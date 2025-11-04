@@ -195,52 +195,62 @@ def fetch_channel_list():
     Returns:
         list: 채널명 리스트
     """
-    try:
-        engine = get_db_connection()
-        
-        # common_code 테이블에서 채널 목록 조회 (parent_idx = 1)
-        query = """
-        SELECT DISTINCT
-            cc.code_name as channel_name,
-            cc.code_id as channel_id
-        FROM common_code cc
-        WHERE cc.parent_idx = 1
-            AND cc.code_name IS NOT NULL
-            AND cc.code_name != ''
-        ORDER BY cc.code_name
-        """
-        
-        df = pd.read_sql(query, engine)
-        
-        channels = ['전체']
-        
-        if not df.empty:
-            # common_code에서 가져온 채널 추가
-            channels.extend(df['channel_name'].tolist())
-        
-        # booking_master_offer 채널 추가 (common_code에 없을 수 있음)
-        from config.channels import CHANNEL_CONFIG
-        for config in CHANNEL_CONFIG['booking_master_offer'].values():
-            channel_name = config['name']
-            if channel_name not in channels:
-                channels.append(channel_name)
-        
-        # order_product 채널도 추가 (common_code에 없을 수 있음)
-        for config in CHANNEL_CONFIG['order_product'].values():
-            channel_name = config['name']
-            if channel_name not in channels:
-                channels.append(channel_name)
-        
-        # 중복 제거 및 정렬
-        channels = ['전체'] + sorted(list(set(channels[1:])))
-        
-        return channels
-        
-    except Exception as e:
-        print(f"❌ 채널 목록 조회 오류: {e}")
-        # 오류 시 기본 채널 목록 반환
-        from config.channels import get_all_channel_names
-        return ['전체'] + get_all_channel_names()
+    import time
+    max_retries = 3
+    retry_delay = 2  # 초
+    
+    for attempt in range(max_retries):
+        try:
+            engine = get_db_connection()
+            
+            # common_code 테이블에서 채널 목록 조회 (parent_idx = 1)
+            query = """
+            SELECT DISTINCT
+                cc.code_name as channel_name,
+                cc.code_id as channel_id
+            FROM common_code cc
+            WHERE cc.parent_idx = 1
+                AND cc.code_name IS NOT NULL
+                AND cc.code_name != ''
+            ORDER BY cc.code_name
+            """
+            
+            df = pd.read_sql(query, engine)
+            
+            channels = ['전체']
+            
+            if not df.empty:
+                # common_code에서 가져온 채널 추가
+                channels.extend(df['channel_name'].tolist())
+            
+            # booking_master_offer 채널 추가 (common_code에 없을 수 있음)
+            from config.channels import CHANNEL_CONFIG
+            for config in CHANNEL_CONFIG['booking_master_offer'].values():
+                channel_name = config['name']
+                if channel_name not in channels:
+                    channels.append(channel_name)
+            
+            # order_product 채널도 추가 (common_code에 없을 수 있음)
+            for config in CHANNEL_CONFIG['order_product'].values():
+                channel_name = config['name']
+                if channel_name not in channels:
+                    channels.append(channel_name)
+            
+            # 중복 제거 및 정렬
+            channels = ['전체'] + sorted(list(set(channels[1:])))
+            
+            return channels
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"⚠️ 채널 목록 조회 시도 {attempt + 1}/{max_retries} 실패, {retry_delay}초 후 재시도...")
+                time.sleep(retry_delay)
+                continue
+            else:
+                print(f"❌ 채널 목록 조회 오류 (최대 재시도 횟수 초과): {e}")
+                # 오류 시 기본 채널 목록 반환
+                from config.channels import get_all_channel_names
+                return ['전체'] + get_all_channel_names()
 
 def fetch_channel_performance(start_date, end_date):
     """

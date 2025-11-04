@@ -65,12 +65,21 @@ with st.sidebar:
     # 채널 선택
     st.subheader("채널 선택")
     
+    # 채널 목록을 캐싱하여 DB 연결 부하 감소
+    @st.cache_data(ttl=3600)  # 1시간 캐시
+    def get_cached_channel_list():
+        try:
+            return fetch_channel_list()
+        except Exception as e:
+            st.error(f"❌ 채널 목록 조회 실패: {e}")
+            return ['전체']  # 기본값 반환
+    
     try:
-        channel_list = fetch_channel_list()
+        channel_list = get_cached_channel_list()
         
-        if not channel_list:
-            st.error("❌ 채널 목록을 불러올 수 없습니다.")
-            st.stop()
+        if not channel_list or channel_list == ['전체']:
+            st.warning("⚠️ 채널 목록을 불러올 수 없습니다. 기본 채널만 사용됩니다.")
+            channel_list = ['전체']
         
         selected_channels = st.multiselect(
             "조회할 채널을 선택하세요",

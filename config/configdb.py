@@ -50,7 +50,12 @@ def get_db_connection():
             connection_string,
             pool_pre_ping=True,  # 연결 상태 자동 확인
             pool_recycle=3600,   # 1시간마다 연결 재활용
-            echo=False            # SQL 로그 출력 (디버깅시 True)
+            echo=False,          # SQL 로그 출력 (디버깅시 True)
+            connect_args={
+                'connect_timeout': 30,  # 연결 타임아웃 30초
+                'read_timeout': 30,     # 읽기 타임아웃 30초
+                'write_timeout': 30     # 쓰기 타임아웃 30초
+            }
         )
         return engine
     except Exception as e:
