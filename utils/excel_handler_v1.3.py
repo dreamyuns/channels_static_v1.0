@@ -1,5 +1,5 @@
-# utils/excel_handler_v1.2.py
-"""엑셀 파일 생성 및 다운로드 처리 v1.2 - 새로운 컬럼 구조"""
+# utils/excel_handler_v1.3.py
+"""엑셀 파일 생성 및 다운로드 처리 v1.3 - 확정/취소 객실수, 취소율 추가"""
 
 import pandas as pd
 from io import BytesIO
@@ -39,9 +39,6 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
                 '항목': '날짜유형',
                 '값': summary_stats.get('date_type', '구매일')
             }, {
-                '항목': '예약상태',
-                '값': summary_stats.get('order_status', '전체')
-            }, {
                 '항목': '생성 일시',
                 '값': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }])
@@ -63,6 +60,9 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
                 'hotel_count': '판매숙소수',
                 'booking_count': '예약건수',
                 'total_rooms': '총객실수',
+                'confirmed_rooms': '확정객실수',
+                'cancelled_rooms': '취소객실수',
+                'cancellation_rate': '취소율',
                 'total_deposit': '총 입금가',
                 'total_purchase': '총 실구매가',
                 'total_profit': '총 수익',
@@ -73,13 +73,16 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
             existing_cols = {k: v for k, v in column_mapping.items() if k in export_df.columns}
             export_df.rename(columns=existing_cols, inplace=True)
             
-            # 컬럼 순서 정리 (원하는 순서대로)
+            # 컬럼 순서 정리 (요청된 순서대로)
             desired_order = [
                 date_col_name,
                 '채널명',
                 '판매숙소수',
                 '예약건수',
                 '총객실수',
+                '확정객실수',
+                '취소객실수',
+                '취소율',
                 '총 입금가',
                 '총 실구매가',
                 '총 수익',
@@ -99,10 +102,16 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
                 export_df[date_col_name] = pd.to_datetime(export_df[date_col_name]).dt.strftime('%Y-%m-%d')
             
             # 숫자 포맷팅 (천단위 구분, 숫자만 표시)
-            numeric_cols = ['판매숙소수', '예약건수', '총객실수', '총 입금가', '총 실구매가', '총 수익']
+            numeric_cols = ['판매숙소수', '예약건수', '총객실수', '확정객실수', '취소객실수', '총 입금가', '총 실구매가', '총 수익']
             for col in numeric_cols:
                 if col in export_df.columns:
                     export_df[col] = export_df[col].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
+            
+            # 취소율 포맷팅 (소수점 1자리, % 표시)
+            if '취소율' in export_df.columns:
+                export_df['취소율'] = export_df['취소율'].apply(
+                    lambda x: f"{float(x):.1f}%" if pd.notna(x) else "0.0%"
+                )
             
             # 수익률 포맷팅 (소수점 1자리)
             if '수익률 (%)' in export_df.columns:

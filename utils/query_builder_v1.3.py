@@ -1,5 +1,5 @@
-# utils/query_builder_v1.2.py
-"""동적 쿼리 생성 모듈 v1.2 - 새로운 컬럼 구조 (판매숙소수, 총객실수, 총 입금가, 총 실구매가, 총 수익, 수익률)"""
+# utils/query_builder_v1.3.py
+"""동적 쿼리 생성 모듈 v1.3 - terms*room_cnt 계산, 확정/취소 객실수, 취소율 추가"""
 
 import sys
 import os
@@ -18,13 +18,14 @@ def build_integrated_query(start_date, end_date, selected_channels=None,
                           date_type='orderDate', order_status='전체'):
     """
     통합 쿼리 생성 (order_product 테이블만 사용, order_pay JOIN 추가)
+    v1.3: terms*room_cnt 계산, 확정/취소 객실수, 취소율 추가
     
     Args:
         start_date: 시작일 (YYYY-MM-DD)
         end_date: 종료일 (YYYY-MM-DD)
         selected_channels: 선택된 채널 리스트 (None이면 전체)
-        date_type: 날짜유형 ('useDate', 'orderDate') - '전체' 옵션 제거
-        order_status: 예약상태 ('전체', '확정', '취소')
+        date_type: 날짜유형 ('useDate', 'orderDate')
+        order_status: 예약상태 ('전체', '확정', '취소') - 항상 '전체'로 고정됨
     
     Returns:
         SQL 쿼리 문자열
@@ -45,7 +46,7 @@ def build_integrated_query(start_date, end_date, selected_channels=None,
             status_list = ','.join([f"'{c}'" for c in channel_codes])
             channel_filter = f"AND op.order_type IN ({status_list})"
     
-    # 날짜 조건 생성 (전체 옵션 제거)
+    # 날짜 조건 생성
     date_condition = ""
     if date_type == 'useDate':
         # 이용일 기준
@@ -56,7 +57,7 @@ def build_integrated_query(start_date, end_date, selected_channels=None,
         date_condition = f"op.create_date >= '{start_date}' AND op.create_date <= '{end_date} 23:59:59'"
         date_field = "DATE(op.create_date)"
     
-    # 예약상태 조건 생성
+    # 예약상태 조건 생성 (항상 '전체'로 고정)
     status_condition = ""
     if order_status == '전체':
         # order_status 시트의 모든 상태값 사용
@@ -67,18 +68,13 @@ def build_integrated_query(start_date, end_date, selected_channels=None,
         else:
             # order_status 시트가 없으면 모든 상태 허용
             status_condition = ""
-    elif order_status == '확정':
-        # 확정 그룹의 모든 상태값
-        confirmed_statuses = get_status_codes_by_group('확정')
-        if confirmed_statuses:
-            status_list = ','.join([f"'{s}'" for s in confirmed_statuses])
-            status_condition = f"AND op.order_product_status IN ({status_list})"
-    elif order_status == '취소':
-        # 취소 그룹의 모든 상태값
-        cancelled_statuses = get_status_codes_by_group('취소')
-        if cancelled_statuses:
-            status_list = ','.join([f"'{s}'" for s in cancelled_statuses])
-            status_condition = f"AND op.order_product_status IN ({status_list})"
+    
+    # 확정/취소 상태 리스트 생성
+    confirmed_statuses = get_status_codes_by_group('확정')
+    cancelled_statuses = get_status_codes_by_group('취소')
+    
+    confirmed_list = ','.join([f"'{s}'" for s in confirmed_statuses]) if confirmed_statuses else "''"
+    cancelled_list = ','.join([f"'{s}'" for s in cancelled_statuses]) if cancelled_statuses else "''"
     
     query = f"""
     SELECT 
@@ -97,7 +93,25 @@ def build_integrated_query(start_date, end_date, selected_channels=None,
         op.order_type as channel_code,
         COUNT(DISTINCT op.order_num) as booking_count,
         COUNT(DISTINCT op.product_name) as hotel_count,
-        SUM(COALESCE(op.room_cnt, 0)) as total_rooms,
+        SUM(COALESCE(op.terms, 1) * COALESCE(op.room_cnt, 0)) as total_rooms,
+        SUM(CASE 
+            WHEN op.order_product_status IN ({confirmed_list}) 
+            THEN COALESCE(op.terms, 1) * COALESCE(op.room_cnt, 0) 
+            ELSE 0 
+        END) as confirmed_rooms,
+        SUM(CASE 
+            WHEN op.order_product_status IN ({cancelled_list}) 
+            THEN COALESCE(op.terms, 1) * COALESCE(op.room_cnt, 0) 
+            ELSE 0 
+        END) as cancelled_rooms,
+        CASE 
+            WHEN SUM(COALESCE(op.terms, 1) * COALESCE(op.room_cnt, 0)) = 0 THEN 0
+            ELSE (SUM(CASE 
+                WHEN op.order_product_status IN ({cancelled_list}) 
+                THEN COALESCE(op.terms, 1) * COALESCE(op.room_cnt, 0) 
+                ELSE 0 
+            END) / SUM(COALESCE(op.terms, 1) * COALESCE(op.room_cnt, 0))) * 100
+        END as cancellation_rate,
         SUM(COALESCE(op.original_amount, 0)) as total_deposit,
         SUM(COALESCE(opay.total_amount, 0)) as total_purchase,
         SUM(COALESCE(opay.total_amount, 0)) - SUM(COALESCE(op.original_amount, 0)) as total_profit,
@@ -130,7 +144,7 @@ def build_summary_query(start_date, end_date, date_type='orderDate', order_statu
         start_date: 시작일
         end_date: 종료일
         date_type: 날짜유형 ('useDate', 'orderDate')
-        order_status: 예약상태
+        order_status: 예약상태 (항상 '전체'로 고정)
     
     Returns:
         SQL 쿼리 문자열
@@ -143,23 +157,12 @@ def build_summary_query(start_date, end_date, date_type='orderDate', order_statu
     else:  # orderDate
         date_condition = f"op.create_date >= '{start_date}' AND op.create_date <= '{end_date} 23:59:59'"
     
-    # 예약상태 조건 (build_integrated_query와 동일한 로직)
+    # 예약상태 조건 (항상 '전체')
     status_condition = ""
-    if order_status == '전체':
-        all_statuses = get_all_order_status_codes()
-        if all_statuses:
-            status_list = ','.join([f"'{s}'" for s in all_statuses])
-            status_condition = f"AND op.order_product_status IN ({status_list})"
-    elif order_status == '확정':
-        confirmed_statuses = get_status_codes_by_group('확정')
-        if confirmed_statuses:
-            status_list = ','.join([f"'{s}'" for s in confirmed_statuses])
-            status_condition = f"AND op.order_product_status IN ({status_list})"
-    elif order_status == '취소':
-        cancelled_statuses = get_status_codes_by_group('취소')
-        if cancelled_statuses:
-            status_list = ','.join([f"'{s}'" for s in cancelled_statuses])
-            status_condition = f"AND op.order_product_status IN ({status_list})"
+    all_statuses = get_all_order_status_codes()
+    if all_statuses:
+        status_list = ','.join([f"'{s}'" for s in all_statuses])
+        status_condition = f"AND op.order_product_status IN ({status_list})"
     
     query = f"""
     SELECT 
@@ -186,7 +189,7 @@ def build_daily_trend_query(start_date, end_date, date_type='orderDate', order_s
         start_date: 시작일
         end_date: 종료일
         date_type: 날짜유형
-        order_status: 예약상태
+        order_status: 예약상태 (항상 '전체'로 고정)
     
     Returns:
         SQL 쿼리 문자열
@@ -200,23 +203,12 @@ def build_daily_trend_query(start_date, end_date, date_type='orderDate', order_s
         date_field = "DATE(op.create_date)"
         date_condition = f"op.create_date >= '{start_date}' AND op.create_date <= '{end_date} 23:59:59'"
     
-    # 예약상태 조건
+    # 예약상태 조건 (항상 '전체')
     status_condition = ""
-    if order_status == '전체':
-        all_statuses = get_all_order_status_codes()
-        if all_statuses:
-            status_list = ','.join([f"'{s}'" for s in all_statuses])
-            status_condition = f"AND op.order_product_status IN ({status_list})"
-    elif order_status == '확정':
-        confirmed_statuses = get_status_codes_by_group('확정')
-        if confirmed_statuses:
-            status_list = ','.join([f"'{s}'" for s in confirmed_statuses])
-            status_condition = f"AND op.order_product_status IN ({status_list})"
-    elif order_status == '취소':
-        cancelled_statuses = get_status_codes_by_group('취소')
-        if cancelled_statuses:
-            status_list = ','.join([f"'{s}'" for s in cancelled_statuses])
-            status_condition = f"AND op.order_product_status IN ({status_list})"
+    all_statuses = get_all_order_status_codes()
+    if all_statuses:
+        status_list = ','.join([f"'{s}'" for s in all_statuses])
+        status_condition = f"AND op.order_product_status IN ({status_list})"
     
     query = f"""
     SELECT 
@@ -261,24 +253,14 @@ if __name__ == "__main__":
     start_date = end_date - timedelta(days=7)
     
     print("="*60)
-    print("📝 쿼리 빌더 테스트 v1.2")
+    print("📝 쿼리 빌더 테스트 v1.3")
     print("="*60)
     
     # 통합 쿼리 테스트
     print(f"\n[통합 쿼리] ({start_date} ~ {end_date})")
     print("- 날짜유형: 구매일, 예약상태: 전체")
     query = build_integrated_query(start_date, end_date, None, 'orderDate', '전체')
-    print(query[:500] + "...")
+    print(query[:800] + "...")
     
-    # 날짜유형 필터 테스트
-    print(f"\n[날짜유형 필터] 이용일")
-    query2 = build_integrated_query(start_date, end_date, None, 'useDate', '전체')
-    print(query2[:300] + "...")
-    
-    # 예약상태 필터 테스트
-    print(f"\n[예약상태 필터] 확정")
-    query3 = build_integrated_query(start_date, end_date, None, 'orderDate', '확정')
-    print(query3[:300] + "...")
-    
-    print("\n✅ 쿼리 빌더 v1.2 준비 완료!")
+    print("\n✅ 쿼리 빌더 v1.3 준비 완료!")
 

@@ -1,5 +1,5 @@
-# utils/data_fetcher_v1.2.py
-"""데이터 조회 및 처리 함수 v1.2 - 새로운 컬럼 구조 지원"""
+# utils/data_fetcher_v1.3.py
+"""데이터 조회 및 처리 함수 v1.3 - terms*room_cnt, 확정/취소 객실수, 취소율 지원"""
 
 import sys
 import os
@@ -11,13 +11,13 @@ from sqlalchemy import text
 from config.configdb import get_db_connection
 # 점이 있는 파일명은 직접 import 불가하므로 importlib 사용
 import importlib.util
-_query_builder_path = os.path.join(os.path.dirname(__file__), 'query_builder_v1.2.py')
-spec = importlib.util.spec_from_file_location("query_builder_v1_2", _query_builder_path)
-query_builder_v1_2 = importlib.util.module_from_spec(spec)
-sys.modules["query_builder_v1_2"] = query_builder_v1_2
-spec.loader.exec_module(query_builder_v1_2)
+_query_builder_path = os.path.join(os.path.dirname(__file__), 'query_builder_v1.3.py')
+spec = importlib.util.spec_from_file_location("query_builder_v1_3", _query_builder_path)
+query_builder_v1_3 = importlib.util.module_from_spec(spec)
+sys.modules["query_builder_v1_3"] = query_builder_v1_3
+spec.loader.exec_module(query_builder_v1_3)
 
-from query_builder_v1_2 import (  # type: ignore
+from query_builder_v1_3 import (  # type: ignore
     build_integrated_query, 
     build_summary_query,
     build_daily_trend_query,
@@ -34,7 +34,7 @@ def fetch_channel_data(start_date, end_date, selected_channels=None,
         end_date: 종료일  
         selected_channels: 선택된 채널 리스트
         date_type: 날짜유형 ('useDate', 'orderDate')
-        order_status: 예약상태 ('전체', '확정', '취소')
+        order_status: 예약상태 (항상 '전체'로 고정)
     
     Returns:
         pandas DataFrame
@@ -88,13 +88,13 @@ def fetch_channel_data(start_date, end_date, selected_channels=None,
             # 3. 선택된 채널명 자체도 추가
             valid_channel_names.update(selected_channels)
         
-        # 쿼리 실행
+        # 쿼리 실행 (order_status는 항상 '전체'로 고정)
         query = build_integrated_query(
             start_date, 
             end_date, 
             selected_channels=None,  # 쿼리 내에서 필터링
             date_type=date_type,
-            order_status=order_status
+            order_status='전체'  # 항상 '전체'로 고정
         )
         
         df = pd.read_sql(query, engine)
@@ -105,6 +105,9 @@ def fetch_channel_data(start_date, end_date, selected_channels=None,
             df['booking_count'] = df['booking_count'].astype(int)
             df['hotel_count'] = df['hotel_count'].astype(int)
             df['total_rooms'] = df['total_rooms'].fillna(0).astype(int)
+            df['confirmed_rooms'] = df['confirmed_rooms'].fillna(0).astype(int)
+            df['cancelled_rooms'] = df['cancelled_rooms'].fillna(0).astype(int)
+            df['cancellation_rate'] = df['cancellation_rate'].fillna(0).round(1)  # 소수점 1자리
             df['total_deposit'] = df['total_deposit'].fillna(0).round(0).astype(int)
             df['total_purchase'] = df['total_purchase'].fillna(0).round(0).astype(int)
             df['total_profit'] = df['total_profit'].fillna(0).round(0).astype(int)
@@ -130,14 +133,14 @@ def fetch_summary_stats(start_date, end_date, date_type='orderDate', order_statu
         start_date: 시작일
         end_date: 종료일
         date_type: 날짜유형
-        order_status: 예약상태
+        order_status: 예약상태 (항상 '전체'로 고정)
     
     Returns:
         dict: 요약 통계 정보
     """
     try:
         engine = get_db_connection()
-        query = build_summary_query(start_date, end_date, date_type, order_status)
+        query = build_summary_query(start_date, end_date, date_type, '전체')  # 항상 '전체'
         
         df = pd.read_sql(query, engine)
         
@@ -173,14 +176,14 @@ def fetch_daily_trend(start_date, end_date, date_type='orderDate', order_status=
         start_date: 시작일
         end_date: 종료일
         date_type: 날짜유형
-        order_status: 예약상태
+        order_status: 예약상태 (항상 '전체'로 고정)
     
     Returns:
         pandas DataFrame
     """
     try:
         engine = get_db_connection()
-        query = build_daily_trend_query(start_date, end_date, date_type, order_status)
+        query = build_daily_trend_query(start_date, end_date, date_type, '전체')  # 항상 '전체'
         
         df = pd.read_sql(query, engine)
         
@@ -260,18 +263,22 @@ def fetch_channel_performance(start_date, end_date, date_type='orderDate', order
         start_date: 시작일
         end_date: 종료일
         date_type: 날짜유형
-        order_status: 예약상태
+        order_status: 예약상태 (항상 '전체'로 고정)
     
     Returns:
         pandas DataFrame
     """
     try:
         engine = get_db_connection()
-        query = build_channel_performance_query(start_date, end_date, date_type, order_status)
+        query = build_channel_performance_query(start_date, end_date, date_type, '전체')  # 항상 '전체'
         
         df = pd.read_sql(query, engine)
         
         if not df.empty:
+            df['total_rooms'] = df['total_rooms'].fillna(0).astype(int)
+            df['confirmed_rooms'] = df['confirmed_rooms'].fillna(0).astype(int)
+            df['cancelled_rooms'] = df['cancelled_rooms'].fillna(0).astype(int)
+            df['cancellation_rate'] = df['cancellation_rate'].fillna(0).round(1)
             df['total_deposit'] = df['total_deposit'].fillna(0).round(0).astype(int)
             df['total_purchase'] = df['total_purchase'].fillna(0).round(0).astype(int)
             df['total_profit'] = df['total_profit'].fillna(0).round(0).astype(int)
@@ -288,7 +295,7 @@ if __name__ == "__main__":
     from datetime import datetime, timedelta
     
     print("="*60)
-    print("📊 데이터 조회 테스트 v1.2")
+    print("📊 데이터 조회 테스트 v1.3")
     print("="*60)
     
     # 테스트 날짜 설정
@@ -304,21 +311,24 @@ if __name__ == "__main__":
     print(f"사용 가능한 채널 ({len(channels)}개): {', '.join(channels[:5])}...")
     
     # 2. 요약 통계
-    print("\n[2. 요약 통계] - 날짜유형: 구매일, 예약상태: 전체")
+    print("\n[2. 요약 통계] - 날짜유형: 구매일")
     stats = fetch_summary_stats(start_date, end_date, 'orderDate', '전체')
     for key, value in stats.items():
         print(f"  - {key}: {value:,}")
     
     # 3. 채널별 데이터
-    print("\n[3. 채널별 예약 데이터] - 날짜유형: 구매일, 예약상태: 확정")
-    df = fetch_channel_data(start_date, end_date, None, 'orderDate', '확정')
+    print("\n[3. 채널별 예약 데이터] - 날짜유형: 구매일")
+    df = fetch_channel_data(start_date, end_date, None, 'orderDate', '전체')
     if not df.empty:
         print(f"  조회 결과: {len(df)}개 레코드")
         print(f"  채널 수: {df['channel_name'].nunique()}개")
         print(f"  총 예약: {df['booking_count'].sum():,}건")
+        print(f"  총 객실수: {df['total_rooms'].sum():,}개")
+        print(f"  확정 객실수: {df['confirmed_rooms'].sum():,}개")
+        print(f"  취소 객실수: {df['cancelled_rooms'].sum():,}개")
         print(f"  컬럼: {df.columns.tolist()}")
     else:
         print("  데이터 없음")
     
-    print("\n✅ 데이터 조회 테스트 v1.2 완료!")
+    print("\n✅ 데이터 조회 테스트 v1.3 완료!")
 

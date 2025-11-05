@@ -1,8 +1,8 @@
-# app_v1.2.py
-"""채널별 예약 통계 시스템 - Streamlit 메인 애플리케이션 v1.2
-- 새로운 컬럼 구조 (판매숙소수, 총객실수, 총 입금가, 총 실구매가, 총 수익, 수익률)
-- 날짜유형 '전체' 옵션 제거 (구매일, 이용일만)
-- 상위 10개만 표시
+# app_v1.3.py
+"""채널별 예약 통계 시스템 - Streamlit 메인 애플리케이션 v1.3
+- terms*room_cnt 계산, 확정/취소 객실수, 취소율 추가
+- 예약상태 필터 UI 제거 (백엔드는 항상 '전체'로 고정)
+- 요약통계 레이아웃 변경
 """
 
 import streamlit as st
@@ -12,32 +12,31 @@ import importlib.util
 import sys
 import os
 
-# v1.2 모듈 import
-_data_fetcher_path = os.path.join(os.path.dirname(__file__), 'utils', 'data_fetcher_v1.2.py')
-spec = importlib.util.spec_from_file_location("data_fetcher_v1_2", _data_fetcher_path)
-data_fetcher_v1_2 = importlib.util.module_from_spec(spec)
-sys.modules["data_fetcher_v1_2"] = data_fetcher_v1_2
-spec.loader.exec_module(data_fetcher_v1_2)
+# v1.3 모듈 import
+_data_fetcher_path = os.path.join(os.path.dirname(__file__), 'utils', 'data_fetcher_v1.3.py')
+spec = importlib.util.spec_from_file_location("data_fetcher_v1_3", _data_fetcher_path)
+data_fetcher_v1_3 = importlib.util.module_from_spec(spec)
+sys.modules["data_fetcher_v1_3"] = data_fetcher_v1_3
+spec.loader.exec_module(data_fetcher_v1_3)
 
-from data_fetcher_v1_2 import (  # type: ignore
+from data_fetcher_v1_3 import (  # type: ignore
     fetch_channel_data,
     fetch_summary_stats,
     fetch_channel_list
 )
 
-# v1.2 excel_handler 동적 import (점이 포함된 파일명)
-_excel_handler_path = os.path.join(os.path.dirname(__file__), 'utils', 'excel_handler_v1.2.py')
-spec_excel = importlib.util.spec_from_file_location("excel_handler_v1_2", _excel_handler_path)
-excel_handler_v1_2 = importlib.util.module_from_spec(spec_excel)
-sys.modules["excel_handler_v1_2"] = excel_handler_v1_2
-spec_excel.loader.exec_module(excel_handler_v1_2)
+# v1.3 excel_handler 동적 import (점이 포함된 파일명)
+_excel_handler_path = os.path.join(os.path.dirname(__file__), 'utils', 'excel_handler_v1.3.py')
+spec_excel = importlib.util.spec_from_file_location("excel_handler_v1_3", _excel_handler_path)
+excel_handler_v1_3 = importlib.util.module_from_spec(spec_excel)
+sys.modules["excel_handler_v1_3"] = excel_handler_v1_3
+spec_excel.loader.exec_module(excel_handler_v1_3)
 
-from excel_handler_v1_2 import create_excel_download  # type: ignore
+from excel_handler_v1_3 import create_excel_download  # type: ignore
 
 from config.master_data_loader import (
     get_date_type_options,
-    get_date_type_display_name,
-    get_order_status_options
+    get_date_type_display_name
 )
 
 # 페이지 설정
@@ -56,7 +55,8 @@ st.markdown("---")
 default_end = date.today() - timedelta(days=1)  # 어제까지 (당일 제외)
 default_start = default_end - timedelta(days=6)  # 최근 7일
 default_date_type = 'orderDate'  # 구매일이 기본값
-default_order_status = '전체'
+# 예약상태는 항상 '전체'로 고정
+order_status = '전체'
 
 # 사이드바: 검색 조건
 with st.sidebar:
@@ -83,8 +83,6 @@ with st.sidebar:
     # 세션 상태 초기화
     if 'date_type' not in st.session_state:
         st.session_state.date_type = default_date_type
-    if 'order_status' not in st.session_state:
-        st.session_state.order_status = default_order_status
     if 'start_date' not in st.session_state:
         st.session_state.start_date = default_start
     if 'end_date' not in st.session_state:
@@ -186,25 +184,7 @@ with st.sidebar:
         st.error(f"❌ 채널 목록 조회 오류: {e}")
         st.stop()
     
-    # 예약상태 선택
-    st.subheader("예약상태")
-    order_status_options = get_order_status_options()
-    
-    # 세션 상태에서 예약상태 인덱스 찾기
-    order_status_index = 0
-    if 'order_status' in st.session_state and st.session_state.order_status in order_status_options:
-        order_status_index = order_status_options.index(st.session_state.order_status)
-    
-    order_status = st.selectbox(
-        "예약상태를 선택하세요",
-        options=order_status_options,
-        index=order_status_index,
-        help="'전체'는 모든 상태를, '확정'은 확정 그룹의 모든 상태를, '취소'는 취소 그룹의 모든 상태를 조회합니다.",
-        key='order_status_select'
-    )
-    
-    # 세션 상태에 예약상태 저장
-    st.session_state.order_status = order_status
+    # 예약상태 필터 제거됨 (UI에서 숨김, 백엔드는 항상 '전체'로 고정)
     
     # 조회 및 초기화 버튼
     st.markdown("---")
@@ -217,7 +197,6 @@ with st.sidebar:
     # 초기화 버튼 처리
     if reset_button:
         st.session_state.date_type = default_date_type
-        st.session_state.order_status = default_order_status
         st.session_state.start_date = default_start
         st.session_state.end_date = default_end
         st.session_state.selected_channels = ['전체']
@@ -244,7 +223,7 @@ if should_show_result:
                     end_date=end_date,
                     selected_channels=query_channels,
                     date_type=date_type,
-                    order_status=order_status
+                    order_status='전체'  # 항상 '전체'로 고정
                 )
                 
                 # 요약 통계 조회
@@ -252,7 +231,7 @@ if should_show_result:
                     start_date, 
                     end_date, 
                     date_type=date_type,
-                    order_status=order_status
+                    order_status='전체'  # 항상 '전체'로 고정
                 )
                 
                 # 조회 결과를 세션 상태에 저장
@@ -262,7 +241,7 @@ if should_show_result:
                     'start_date': start_date,
                     'end_date': end_date,
                     'date_type': date_type,
-                    'order_status': order_status,
+                    'order_status': '전체',  # 항상 '전체'
                     'selected_channels': selected_channels,
                     'days_diff': days_diff
                 }
@@ -287,7 +266,7 @@ if should_show_result:
             start_date = result['start_date']
             end_date = result['end_date']
             date_type = result['date_type']
-            order_status = result['order_status']
+            order_status = result['order_status']  # '전체'
             days_diff = result['days_diff']
         else:
             # 이전 결과가 없으면 빈 결과
@@ -302,30 +281,41 @@ if should_show_result:
     # 결과 표시
     if df.empty:
         st.warning("⚠️ 조회된 데이터가 없습니다.")
-        st.info("다른 날짜 범위, 날짜유형, 예약상태 또는 채널을 선택해보세요.")
+        st.info("다른 날짜 범위, 날짜유형 또는 채널을 선택해보세요.")
     else:
         # 요약 통계 표시
         st.subheader("📈 요약 통계")
         
         # 결과 데이터에서 합계 계산
         total_rooms = int(df['total_rooms'].sum()) if 'total_rooms' in df.columns else 0
+        confirmed_rooms = int(df['confirmed_rooms'].sum()) if 'confirmed_rooms' in df.columns else 0
+        cancelled_rooms = int(df['cancelled_rooms'].sum()) if 'cancelled_rooms' in df.columns else 0
+        cancellation_rate = (cancelled_rooms / total_rooms * 100) if total_rooms > 0 else 0.0
         total_deposit = int(df['total_deposit'].sum()) if 'total_deposit' in df.columns else 0
         total_purchase = int(df['total_purchase'].sum()) if 'total_purchase' in df.columns else 0
         total_profit = int(df['total_profit'].sum()) if 'total_profit' in df.columns else 0
         
-        # 1번 줄: 총 예약건수
-        st.metric("총 예약 건수", f"{summary_stats.get('total_bookings', 0):,}건")
-        
-        # 2번 줄: 총 객실수, 총 입금가, 총 실구매가, 총 수익
-        col2, col3, col4, col5 = st.columns(4)
+        # 1행: 총 예약건수 | 총 입금가 | 총 실구매가 | 총 수익
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("총 예약 건수", f"{summary_stats.get('total_bookings', 0):,}건")
         with col2:
-            st.metric("총 객실수", f"{total_rooms:,}개")
-        with col3:
             st.metric("총 입금가", f"{total_deposit:,}")
-        with col4:
+        with col3:
             st.metric("총 실구매가", f"{total_purchase:,}")
-        with col5:
+        with col4:
             st.metric("총 수익", f"{total_profit:,}")
+        
+        # 2행: 총 객실수 | 확정 객실 수 | 취소 객실 수 | 취소율
+        col5, col6, col7, col8 = st.columns(4)
+        with col5:
+            st.metric("총 객실수", f"{total_rooms:,}개")
+        with col6:
+            st.metric("확정 객실 수", f"{confirmed_rooms:,}개")
+        with col7:
+            st.metric("취소 객실 수", f"{cancelled_rooms:,}개")
+        with col8:
+            st.metric("취소율", f"{cancellation_rate:.1f}%")
         
         st.markdown("---")
         
@@ -353,6 +343,9 @@ if should_show_result:
             'hotel_count': '판매숙소수',
             'booking_count': '예약건수',
             'total_rooms': '총객실수',
+            'confirmed_rooms': '확정객실수',
+            'cancelled_rooms': '취소객실수',
+            'cancellation_rate': '취소율',
             'total_deposit': '총 입금가',
             'total_purchase': '총 실구매가',
             'total_profit': '총 수익',
@@ -371,6 +364,9 @@ if should_show_result:
             '판매숙소수',
             '예약건수',
             '총객실수',
+            '확정객실수',
+            '취소객실수',
+            '취소율',
             '총 입금가',
             '총 실구매가',
             '총 수익',
@@ -382,10 +378,16 @@ if should_show_result:
         display_df = display_df[final_cols]
         
         # 숫자 포맷팅 (천단위 구분, 숫자만 표시)
-        numeric_cols = ['판매숙소수', '예약건수', '총객실수', '총 입금가', '총 실구매가', '총 수익']
+        numeric_cols = ['판매숙소수', '예약건수', '총객실수', '확정객실수', '취소객실수', '총 입금가', '총 실구매가', '총 수익']
         for col in numeric_cols:
             if col in display_df.columns:
                 display_df[col] = display_df[col].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
+        
+        # 취소율 포맷팅 (소수점 1자리, % 표시)
+        if '취소율' in display_df.columns:
+            display_df['취소율'] = display_df['취소율'].apply(
+                lambda x: f"{float(x):.1f}%" if pd.notna(x) else "0.0%"
+            )
         
         # 수익률 포맷팅 (소수점 1자리)
         if '수익률 (%)' in display_df.columns:
@@ -414,8 +416,7 @@ if should_show_result:
             **summary_stats,
             'start_date': str(start_date),
             'end_date': str(end_date),
-            'date_type': date_type_display_for_excel.get(date_type, date_type),
-            'order_status': order_status
+            'date_type': date_type_display_for_excel.get(date_type, date_type)
         }
         
         excel_data, filename = create_excel_download(
@@ -441,18 +442,18 @@ else:
     1. **날짜유형 선택**: 이용일 또는 구매일 기준을 선택하세요
     2. **날짜 범위 선택**: 시작일과 종료일을 선택하세요 (최대 3개월)
     3. **채널 선택**: 조회할 채널을 선택하세요 (여러 개 선택 가능)
-    4. **예약상태 선택**: 전체, 확정, 또는 취소를 선택하세요
-    5. **조회**: '조회' 버튼을 클릭하여 데이터를 조회합니다
-    6. **초기화**: '초기화' 버튼을 클릭하여 모든 필터를 기본값으로 되돌립니다
-    7. **엑셀 다운로드**: 조회 결과를 엑셀 파일로 다운로드할 수 있습니다
+    4. **조회**: '조회' 버튼을 클릭하여 데이터를 조회합니다
+    5. **초기화**: '초기화' 버튼을 클릭하여 모든 필터를 기본값으로 되돌립니다
+    6. **엑셀 다운로드**: 조회 결과를 엑셀 파일로 다운로드할 수 있습니다
     
     **주의사항**:
     - 당일 데이터는 조회할 수 없습니다 (D-1까지만 조회 가능)
     - 조회 기간은 최대 90일(3개월)까지 가능합니다
     - 상세 데이터는 상위 10개만 표시되며, 전체 데이터는 엑셀 다운로드를 이용하세요
+    - 예약상태는 상세 데이터에서 확인할 수 있습니다 (확정/취소 객실수, 취소율)
     """)
 
 # 푸터
 st.markdown("---")
-st.caption("채널별 예약 통계 시스템 v1.2 | 개발 서버")
+st.caption("채널별 예약 통계 시스템 v1.3 | 개발 서버")
 
