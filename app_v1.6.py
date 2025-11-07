@@ -211,10 +211,15 @@ with col_header2:
         # 세션 상태 먼저 삭제
         logout(st.session_state)
         
-        # 쿠키 삭제
+        # 쿠키 삭제 및 페이지 리로드 (JavaScript로 강제 리로드)
         cookie_script = """
         <script>
+        // 쿠키 삭제
         document.cookie = "auth_admin_id=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
+        // 페이지 강제 리로드하여 로그인 페이지로 이동
+        setTimeout(function() {
+            window.location.reload(true);
+        }, 100);
         </script>
         """
         st.components.v1.html(cookie_script, height=0)
@@ -223,7 +228,7 @@ with col_header2:
         if '_logout_in_progress' in st.session_state:
             del st.session_state['_logout_in_progress']
         
-        # 페이지 리로드하여 로그인 페이지로 이동
+        # st.rerun()도 호출 (이중 안전장치)
         st.rerun()
 
 st.markdown("---")
