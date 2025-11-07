@@ -53,3 +53,12 @@ env.py
 *.bak
 *.cache
 
+# Documentation and guides (excluded from upload)
+docs/
+
+# Debug SQL queries
+query/
+
+# Backup files
+backup/
+

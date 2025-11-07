@@ -7,6 +7,14 @@ from sqlalchemy import create_engine
 import pandas as pd
 import pymysql
 
+# SSH 터널 지원 (선택사항)
+try:
+    from sshtunnel import SSHTunnelForwarder
+    SSH_TUNNEL_AVAILABLE = True
+except ImportError:
+    SSH_TUNNEL_AVAILABLE = False
+    SSHTunnelForwarder = None
+
 # 프로젝트 루트 디렉토리 찾기 (현재 파일의 위치에서 계산)
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_current_dir)
@@ -20,12 +28,89 @@ else:
     # 프로젝트 루트에 없으면 현재 작업 디렉토리에서 찾기
     load_dotenv(override=True)
 
+# SSH 터널 전역 변수 (프로세스 종료 시 정리)
+_ssh_tunnel = None
+
+def _setup_ssh_tunnel():
+    """SSH 터널 설정 (필요한 경우)"""
+    global _ssh_tunnel
+    
+    # SSH 터널 정보 확인
+    ssh_host = os.getenv('SSH_HOST')
+    ssh_port = int(os.getenv('SSH_PORT', 22))
+    ssh_user = os.getenv('SSH_USER')
+    ssh_password = os.getenv('SSH_PASSWORD')
+    
+    # SSH 터널이 필요한지 확인
+    if not ssh_host or not ssh_user:
+        return None  # SSH 터널 미사용
+    
+    # 원격 DB 정보 확인
+    remote_host = os.getenv('DB_REMOTE_HOST')
+    remote_port = int(os.getenv('DB_REMOTE_PORT', 3306))
+    
+    if not remote_host:
+        return None  # SSH 터널 미사용
+    
+    # SSH 터널 라이브러리가 없으면 경고만 출력
+    if not SSH_TUNNEL_AVAILABLE:
+        print("⚠️  SSH 터널 라이브러리가 설치되지 않았습니다.")
+        print("   PuTTY 등으로 수동으로 SSH 터널을 설정하거나, 다음 명령으로 설치하세요:")
+        print("   pip install sshtunnel")
+        return None
+    
+    # 이미 터널이 열려있으면 재사용
+    if _ssh_tunnel and _ssh_tunnel.is_alive:
+        return _ssh_tunnel
+    
+    try:
+        # SSH 터널 생성
+        print(f"[SSH] SSH 터널 생성 중... ({ssh_user}@{ssh_host}:{ssh_port})")
+        _ssh_tunnel = SSHTunnelForwarder(
+            (ssh_host, ssh_port),
+            ssh_username=ssh_user,
+            ssh_password=ssh_password,
+            remote_bind_address=(remote_host, remote_port),
+            local_bind_address=('127.0.0.1', 0)  # 0은 사용 가능한 포트 자동 할당
+        )
+        _ssh_tunnel.start()
+        print(f"[SSH] SSH 터널 생성 완료! (로컬: {_ssh_tunnel.local_bind_host}:{_ssh_tunnel.local_bind_port})")
+        return _ssh_tunnel
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] SSH 터널 생성 실패!")
+        print(f"[ERROR] 오류 타입: {type(e).__name__}")
+        print(f"[ERROR] 오류 메시지: {str(e)}")
+        print("\n[ERROR] 상세 오류 정보:")
+        traceback.print_exc()
+        print("\n[해결 방법]")
+        print("1. SSH 서버 정보 확인 (SSH_HOST, SSH_PORT, SSH_USER, SSH_PASSWORD)")
+        print("2. 네트워크 연결 확인 (SSH 서버에 접근 가능한지)")
+        print("3. PuTTY 등으로 수동으로 SSH 터널을 설정하거나")
+        print("4. SSH 터널 없이 직접 연결을 시도하세요")
+        return None
+
 def get_db_connection():
     """데이터베이스 연결 객체 반환"""
+    global _ssh_tunnel
+    
+    # SSH 터널 설정 (필요한 경우)
+    tunnel = _setup_ssh_tunnel()
+    
+    # SSH 터널을 사용하는 경우 로컬 포트 사용
+    if tunnel:
+        db_host = tunnel.local_bind_host
+        db_port = tunnel.local_bind_port
+        print(f"📡 SSH 터널을 통해 DB 연결: {db_host}:{db_port}")
+    else:
+        # 직접 연결
+        db_host = os.getenv('DB_HOST')
+        db_port = int(os.getenv('DB_PORT', 3306))
+    
     # 환경변수에서 DB 정보 읽기
     db_config = {
-        'host': os.getenv('DB_HOST'),
-        'port': int(os.getenv('DB_PORT', 3306)),
+        'host': db_host,
+        'port': db_port,
         'user': os.getenv('DB_USER'),
         'password': os.getenv('DB_PASSWORD'),
         'database': os.getenv('DB_NAME')

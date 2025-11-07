@@ -1,8 +1,9 @@
-# app_v1.3.py
-"""채널별 예약 통계 시스템 - Streamlit 메인 애플리케이션 v1.3
-- terms*room_cnt 계산, 확정/취소 객실수, 취소율 추가
-- 예약상태 필터 UI 제거 (백엔드는 항상 '전체'로 고정)
-- 요약통계 레이아웃 변경
+# app_v1.6.py
+"""채널별 예약 통계 시스템 - Streamlit 메인 애플리케이션 v1.6
+- 인증 기능 추가 (tblmanager 테이블 기반)
+- 로깅 기능 추가 (타입별 로그 파일 분리)
+- 로딩 표시 개선 (st.status 사용)
+- 세션 타임아웃 관리 (1시간, 5분 전 경고)
 """
 
 import streamlit as st
@@ -12,27 +13,38 @@ import importlib.util
 import sys
 import os
 
-# v1.3 모듈 import
-_data_fetcher_path = os.path.join(os.path.dirname(__file__), 'utils', 'data_fetcher_v1.3.py')
-spec = importlib.util.spec_from_file_location("data_fetcher_v1_3", _data_fetcher_path)
-data_fetcher_v1_3 = importlib.util.module_from_spec(spec)
-sys.modules["data_fetcher_v1_3"] = data_fetcher_v1_3
-spec.loader.exec_module(data_fetcher_v1_3)
+# 로깅 모듈 import 및 초기화
+from utils.logger import setup_logging, log_auth, log_error, log_access
+setup_logging()
 
-from data_fetcher_v1_3 import (  # type: ignore
+# 인증 모듈 import
+from utils.auth import (
+    authenticate_user,
+    is_authenticated,
+    logout
+)
+
+# v1.5 모듈 import
+_data_fetcher_path = os.path.join(os.path.dirname(__file__), 'utils', 'data_fetcher_v1.5.py')
+spec = importlib.util.spec_from_file_location("data_fetcher_v1_5", _data_fetcher_path)
+data_fetcher_v1_5 = importlib.util.module_from_spec(spec)
+sys.modules["data_fetcher_v1_5"] = data_fetcher_v1_5
+spec.loader.exec_module(data_fetcher_v1_5)
+
+from data_fetcher_v1_5 import (  # type: ignore
     fetch_channel_data,
     fetch_summary_stats,
     fetch_channel_list
 )
 
-# v1.3 excel_handler 동적 import (점이 포함된 파일명)
-_excel_handler_path = os.path.join(os.path.dirname(__file__), 'utils', 'excel_handler_v1.3.py')
-spec_excel = importlib.util.spec_from_file_location("excel_handler_v1_3", _excel_handler_path)
-excel_handler_v1_3 = importlib.util.module_from_spec(spec_excel)
-sys.modules["excel_handler_v1_3"] = excel_handler_v1_3
-spec_excel.loader.exec_module(excel_handler_v1_3)
+# v1.5 excel_handler 동적 import (점이 포함된 파일명)
+_excel_handler_path = os.path.join(os.path.dirname(__file__), 'utils', 'excel_handler_v1.5.py')
+spec_excel = importlib.util.spec_from_file_location("excel_handler_v1_5", _excel_handler_path)
+excel_handler_v1_5 = importlib.util.module_from_spec(spec_excel)
+sys.modules["excel_handler_v1_5"] = excel_handler_v1_5
+spec_excel.loader.exec_module(excel_handler_v1_5)
 
-from excel_handler_v1_3 import create_excel_download  # type: ignore
+from excel_handler_v1_5 import create_excel_download  # type: ignore
 
 from config.master_data_loader import (
     get_date_type_options,
@@ -47,9 +59,178 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 제목
-st.title("📊 채널별 예약 통계 시스템")
+# ============================================
+# 인증 체크 및 로그인 페이지
+# ============================================
+
+# 쿠키에서 인증 정보 복원 (새로고침 문제 해결)
+def restore_auth_from_cookie():
+    """쿠키에서 인증 정보를 읽어 세션 상태에 복원"""
+    # 로그아웃 중이면 복원하지 않음
+    if st.session_state.get('_logout_in_progress', False):
+        return False
+    
+    try:
+        if hasattr(st, 'context') and hasattr(st.context, 'cookies'):
+            cookies = st.context.cookies
+            cookie_dict = cookies.to_dict() if hasattr(cookies, 'to_dict') else dict(cookies)
+            
+            log_auth("DEBUG", "쿠키 확인", 
+                    available_cookies=list(cookie_dict.keys()),
+                    has_auth_cookie='auth_admin_id' in cookie_dict)
+            
+            if 'auth_admin_id' in cookie_dict:
+                admin_id = cookie_dict.get('auth_admin_id')
+                if admin_id and not is_authenticated(st.session_state):
+                    # 세션 상태가 비어있고 쿠키에 인증 정보가 있으면 복원
+                    st.session_state.authenticated = True
+                    st.session_state.admin_id = admin_id
+                    log_auth("INFO", "쿠키에서 인증 정보 복원", admin_id=admin_id)
+                    return True
+            else:
+                log_auth("DEBUG", "쿠키에 auth_admin_id 없음", 
+                        available_cookies=list(cookie_dict.keys()))
+    except Exception as e:
+        log_error("WARNING", "쿠키에서 인증 정보 복원 실패", exception=e)
+    return False
+
+# 쿠키에서 인증 정보 복원 시도
+restore_auth_from_cookie()
+
+# 디버깅: 세션 상태 확인
+debug_info = {
+    'has_authenticated': 'authenticated' in st.session_state,
+    'authenticated_value': st.session_state.get('authenticated', 'NOT_SET'),
+    'has_admin_id': 'admin_id' in st.session_state,
+    'admin_id_value': st.session_state.get('admin_id', 'NOT_SET'),
+    'session_state_keys': list(st.session_state.keys())
+}
+is_auth_result = is_authenticated(st.session_state)
+
+# 디버깅 로그
+log_auth("INFO", "인증 상태 체크", 
+         is_authenticated=is_auth_result,
+         debug_info=str(debug_info))
+
+# 인증 상태 확인
+if not is_auth_result:
+    # 로그인 페이지
+    st.title("🔐 로그인")
+    st.markdown("---")
+    
+    # 디버깅 정보 표시 (개발용)
+    with st.expander("🔍 디버깅 정보 (개발용)", expanded=False):
+        st.json(debug_info)
+        st.write(f"**is_authenticated() 결과:** {is_auth_result}")
+    
+    # 로그인 폼
+    with st.form("login_form"):
+        admin_id = st.text_input("사용자 ID", placeholder="admin_id를 입력하세요")
+        password = st.text_input("비밀번호", type="password", placeholder="비밀번호를 입력하세요")
+        login_button = st.form_submit_button("로그인", type="primary", use_container_width=True)
+        
+        if login_button:
+            if admin_id and password:
+                # 인증 시도
+                auth_result = authenticate_user(admin_id, password)
+                
+                if auth_result['success']:
+                    # 로그인 성공
+                    st.session_state.authenticated = True
+                    st.session_state.admin_id = auth_result['admin_id']
+                    
+                    # 쿠키에 인증 정보 저장 (새로고침 문제 해결)
+                    # JavaScript를 사용하여 쿠키 설정
+                    admin_id = auth_result['admin_id']
+                    # 쿠키 설정 스크립트 (더 명확하게)
+                    cookie_script = f"""
+                    <script>
+                    function setCookie(name, value, days) {{
+                        var expires = "";
+                        if (days) {{
+                            var date = new Date();
+                            date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                            expires = "; expires=" + date.toUTCString();
+                        }}
+                        document.cookie = name + "=" + value + expires + "; path=/; SameSite=Lax";
+                        console.log("Cookie set: " + name + "=" + value);
+                    }}
+                    setCookie("auth_admin_id", "{admin_id}", 1);
+                    </script>
+                    """
+                    st.components.v1.html(cookie_script, height=0)
+                    
+                    # 디버깅: 로그인 성공 후 세션 상태 확인
+                    log_auth("INFO", "로그인 성공 - 세션 상태 및 쿠키 저장 시도", 
+                             admin_id=auth_result['admin_id'],
+                             authenticated_set=st.session_state.get('authenticated'),
+                             admin_id_set=st.session_state.get('admin_id'),
+                             all_keys=list(st.session_state.keys()))
+                    
+                    st.rerun()
+                else:
+                    # 로그인 실패 - 상세 정보 표시
+                    error_msg = auth_result['error']
+                    user_status = auth_result.get('user_status', 'N/A')
+                    
+                    # 디버깅 정보 (개발 환경에서만 표시)
+                    debug_info = f"\n\n**디버깅 정보:**\n- user_status: `{user_status}` (타입: {type(user_status).__name__})"
+                    
+                    st.error(f"⚠️ {error_msg}")
+                    st.info(f"💡 로그 파일(`logs/auth.log`)에서 상세 정보를 확인할 수 있습니다.{debug_info}")
+                    log_auth("WARNING", "로그인 실패", admin_id=admin_id, 사유=error_msg, user_status=str(user_status))
+            else:
+                st.error("⚠️ ID와 비밀번호를 입력해주세요.")
+    
+    st.markdown("---")
+    st.caption("채널별 예약 통계 시스템 v1.6 | 로그인이 필요합니다")
+    st.stop()
+
+# 인증된 사용자만 여기까지 도달
+# 세션 타임아웃 체크 제거됨 (새로고침 문제 해결)
+
+# 디버깅: 인증된 사용자 접근 확인
+log_auth("INFO", "인증된 사용자 접근", 
+         admin_id=st.session_state.get('admin_id'),
+         authenticated=st.session_state.get('authenticated'),
+         session_keys=list(st.session_state.keys()))
+
+# ============================================
+# 메인 애플리케이션
+# ============================================
+
+# 헤더 (제목 + 로그아웃 버튼)
+col_header1, col_header2 = st.columns([10, 1])
+with col_header1:
+    st.title("📊 채널별 예약 통계 시스템")
+with col_header2:
+    if st.button("🚪 로그아웃", type="secondary", use_container_width=True):
+        # 로그아웃 플래그 설정 (쿠키 복원 방지)
+        st.session_state['_logout_in_progress'] = True
+        
+        # 세션 상태 먼저 삭제
+        logout(st.session_state)
+        
+        # 쿠키 삭제
+        cookie_script = """
+        <script>
+        document.cookie = "auth_admin_id=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
+        </script>
+        """
+        st.components.v1.html(cookie_script, height=0)
+        
+        # 로그아웃 플래그도 삭제 (다음 요청에서 정상 동작하도록)
+        if '_logout_in_progress' in st.session_state:
+            del st.session_state['_logout_in_progress']
+        
+        # 페이지 리로드하여 로그인 페이지로 이동
+        st.rerun()
+
 st.markdown("---")
+
+# 사용자 정보 표시 (선택사항)
+admin_id = st.session_state.get('admin_id', 'unknown')
+st.caption(f"👤 로그인 사용자: {admin_id}")
 
 # 기본값 설정
 default_end = date.today() - timedelta(days=1)  # 어제까지 (당일 제외)
@@ -109,19 +290,36 @@ with st.sidebar:
     # 세션 상태에 날짜유형 저장
     st.session_state.date_type = date_type
     
+    # 날짜 범위 설정: 날짜유형에 따라 다르게 설정
+    today = date.today()
+    min_date = today - timedelta(days=90)  # 90일 전
+    
+    if date_type == 'useDate':
+        # 이용일(체크인) 기준: 미래 날짜도 선택 가능
+        max_date = today + timedelta(days=90)  # 90일 후
+        start_help = "이용일(체크인) 기준으로 조회합니다. 미래 날짜도 선택 가능합니다."
+        end_help = "이용일(체크인) 기준으로 조회합니다. 미래 날짜도 선택 가능합니다."
+    else:
+        # 구매일 기준: 어제까지만 선택 가능
+        max_date = today - timedelta(days=1)  # 어제까지
+        start_help = "구매일(예약일) 기준으로 조회합니다. 당일 데이터는 조회할 수 없습니다 (D-1까지만 조회 가능)"
+        end_help = "구매일(예약일) 기준으로 조회합니다. 당일 데이터는 조회할 수 없습니다 (D-1까지만 조회 가능)"
+    
     start_date = st.date_input(
         "시작일",
         value=st.session_state.start_date,
-        max_value=date.today() - timedelta(days=1),
-        help="당일 데이터는 조회할 수 없습니다 (D-1까지만 조회 가능)",
+        min_value=min_date,
+        max_value=max_date,
+        help=start_help,
         key='start_date_input'
     )
     
     end_date = st.date_input(
         "종료일",
         value=st.session_state.end_date,
-        max_value=date.today() - timedelta(days=1),
-        help="당일 데이터는 조회할 수 없습니다 (D-1까지만 조회 가능)",
+        min_value=min_date,
+        max_value=max_date,
+        help=end_help,
         key='end_date_input'
     )
     
@@ -153,6 +351,7 @@ with st.sidebar:
             return fetch_channel_list()
         except Exception as e:
             st.error(f"❌ 채널 목록 조회 실패: {e}")
+            log_error("ERROR", "채널 목록 조회 실패", exception=e, admin_id=admin_id)
             return ['전체']  # 기본값 반환
     
     try:
@@ -182,6 +381,7 @@ with st.sidebar:
         
     except Exception as e:
         st.error(f"❌ 채널 목록 조회 오류: {e}")
+        log_error("ERROR", "채널 목록 조회 오류", exception=e, admin_id=admin_id)
         st.stop()
     
     # 예약상태 필터 제거됨 (UI에서 숨김, 백엔드는 항상 '전체'로 고정)
@@ -211,13 +411,22 @@ should_show_result = search_button or has_search_result
 if should_show_result:
     # 조회 버튼이 클릭된 경우에만 새로 조회
     if search_button:
-        # 데이터 조회
-        with st.spinner("데이터를 조회하는 중..."):
-            try:
+        # 데이터 조회 (로딩 표시 개선: st.status 사용)
+        status = st.status("🔄 데이터를 조회하는 중...", expanded=True, state="running")
+        
+        try:
+            with status:
                 # 채널별 데이터 조회 (쿼리용 채널 리스트 사용)
                 # 채널 목록 다시 가져오기
                 channel_list_for_query = get_cached_channel_list()
                 query_channels = channel_list_for_query[1:] if '전체' in selected_channels else selected_channels
+                
+                # 로깅: 데이터 조회 시작
+                log_access("INFO", "데이터 조회 시작", admin_id=admin_id, 
+                          기간=f"{start_date}~{end_date}", 
+                          채널=",".join(selected_channels),
+                          날짜유형=date_type)
+                
                 df = fetch_channel_data(
                     start_date=start_date,
                     end_date=end_date,
@@ -246,17 +455,30 @@ if should_show_result:
                     'days_diff': days_diff
                 }
                 
-            except Exception as e:
-                st.error(f"❌ 데이터 조회 중 오류가 발생했습니다: {e}")
-                st.exception(e)
-                df = pd.DataFrame()
-                summary_stats = {
-                    'total_bookings': 0,
-                    'total_revenue': 0,
-                    'channel_count': 0,
-                    'active_days': 0
-                }
-                st.session_state.last_search_result = None
+                # 로깅: 데이터 조회 완료
+                log_access("INFO", "데이터 조회 완료", admin_id=admin_id, 
+                          결과건수=len(df))
+            
+            # 로딩 완료 상태 변경
+            status.update(label="✅ 데이터 조회 완료", state="complete", expanded=False)
+                
+        except Exception as e:
+            # 에러 로깅
+            log_error("ERROR", "데이터 조회 중 오류 발생", exception=e, admin_id=admin_id,
+                     기간=f"{start_date}~{end_date}", 채널=",".join(selected_channels))
+            
+            status.update(label="❌ 데이터 조회 실패", state="error", expanded=False)
+            st.error(f"❌ 데이터 조회 중 오류가 발생했습니다: {e}")
+            st.exception(e)
+            
+            df = pd.DataFrame()
+            summary_stats = {
+                'total_bookings': 0,
+                'total_revenue': 0,
+                'channel_count': 0,
+                'active_days': 0
+            }
+            st.session_state.last_search_result = None
     else:
         # 이전 조회 결과 사용
         if st.session_state.last_search_result is not None:
@@ -283,10 +505,31 @@ if should_show_result:
         st.warning("⚠️ 조회된 데이터가 없습니다.")
         st.info("다른 날짜 범위, 날짜유형 또는 채널을 선택해보세요.")
     else:
+        # 사용안내 (접기/펼치기)
+        with st.expander("📌 사용 안내", expanded=False):
+            st.markdown("""
+            **사용 방법:**
+            1. **날짜유형 선택**: 이용일 또는 구매일 기준을 선택하세요
+            2. **날짜 범위 선택**: 시작일과 종료일을 선택하세요 (최대 3개월)
+               - 이용일 기준: 오늘 기준 90일 전 ~ 90일 후까지 선택 가능
+               - 구매일 기준: 오늘 기준 90일 전 ~ 어제까지 선택 가능
+            3. **채널 선택**: 조회할 채널을 선택하세요 (여러 개 선택 가능)
+            4. **조회**: '조회' 버튼을 클릭하여 데이터를 조회합니다
+            5. **초기화**: '초기화' 버튼을 클릭하여 모든 필터를 기본값으로 되돌립니다
+            6. **엑셀 다운로드**: 조회 결과를 엑셀 파일로 다운로드할 수 있습니다
+            
+            **주의사항:**
+            - 구매일 기준 조회 시 당일 데이터는 조회할 수 없습니다 (D-1까지만 조회 가능)
+            - 조회 기간은 최대 90일(3개월)까지 가능합니다
+            - 상세 데이터는 상위 10개만 표시되며, 전체 데이터는 엑셀 다운로드를 이용하세요
+            - 예약상태는 상세 데이터에서 확인할 수 있습니다 (확정/취소 객실수, 취소율)
+            """)
+        
         # 요약 통계 표시
         st.subheader("📈 요약 통계")
         
         # 결과 데이터에서 합계 계산
+        total_bookings = int(df['booking_count'].sum()) if 'booking_count' in df.columns else 0
         total_rooms = int(df['total_rooms'].sum()) if 'total_rooms' in df.columns else 0
         confirmed_rooms = int(df['confirmed_rooms'].sum()) if 'confirmed_rooms' in df.columns else 0
         cancelled_rooms = int(df['cancelled_rooms'].sum()) if 'cancelled_rooms' in df.columns else 0
@@ -298,7 +541,7 @@ if should_show_result:
         # 1행: 총 예약건수 | 총 입금가 | 총 실구매가 | 총 수익
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("총 예약 건수", f"{summary_stats.get('total_bookings', 0):,}건")
+            st.metric("총 예약 건수", f"{total_bookings:,}건")
         with col2:
             st.metric("총 입금가", f"{total_deposit:,}")
         with col3:
@@ -419,19 +662,26 @@ if should_show_result:
             'date_type': date_type_display_for_excel.get(date_type, date_type)
         }
         
-        excel_data, filename = create_excel_download(
-            df=df,  # 전체 데이터 (엑셀에는 전체 포함)
-            summary_stats=summary_for_excel,
-            date_type=date_type
-        )
-        
-        st.download_button(
-            label="📥 엑셀 파일 다운로드",
-            data=excel_data,
-            file_name=filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+        try:
+            excel_data, filename = create_excel_download(
+                df=df,  # 전체 데이터 (엑셀에는 전체 포함)
+                summary_stats=summary_for_excel,
+                date_type=date_type
+            )
+            
+            st.download_button(
+                label="📥 엑셀 파일 다운로드",
+                data=excel_data,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+            
+            # 엑셀 다운로드 로깅
+            log_access("INFO", "엑셀 다운로드", admin_id=admin_id, 파일명=filename)
+        except Exception as e:
+            log_error("ERROR", "엑셀 다운로드 실패", exception=e, admin_id=admin_id)
+            st.error(f"❌ 엑셀 다운로드 중 오류가 발생했습니다: {e}")
 
 else:
     # 초기 화면: 사용 안내
@@ -455,5 +705,5 @@ else:
 
 # 푸터
 st.markdown("---")
-st.caption("채널별 예약 통계 시스템 v1.3 | 개발 서버")
+st.caption("채널별 예약 통계 시스템 v1.6 | 개발 서버")
 
