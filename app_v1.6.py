@@ -66,6 +66,13 @@ st.set_page_config(
 # 쿠키에서 인증 정보 복원 (새로고침 문제 해결)
 def restore_auth_from_cookie():
     """쿠키에서 인증 정보를 읽어 세션 상태에 복원"""
+    try:
+        log_auth("DEBUG", "restore_auth_from_cookie 시작", 
+                has_logout_flag=st.session_state.get('_logout_in_progress', False),
+                is_authenticated=is_authenticated(st.session_state))
+    except:
+        pass
+    
     # 로그아웃 중이면 복원하지 않음
     # 단, 로그아웃 플래그는 로그아웃 버튼 클릭 시에만 설정되므로
     # 새로고침 시에는 플래그가 없어야 함
@@ -78,18 +85,33 @@ def restore_auth_from_cookie():
     
     # 이미 인증되어 있으면 복원 불필요
     if is_authenticated(st.session_state):
+        try:
+            log_auth("DEBUG", "이미 인증됨 - 쿠키 복원 불필요")
+        except:
+            pass
         return True
     
     try:
         # 방법 1: st.context.cookies 사용
-        if hasattr(st, 'context') and hasattr(st.context, 'cookies'):
+        has_context = hasattr(st, 'context')
+        has_cookies = has_context and hasattr(st.context, 'cookies')
+        
+        try:
+            log_auth("DEBUG", "쿠키 접근 시도", 
+                    has_context=has_context,
+                    has_cookies=has_cookies)
+        except:
+            pass
+        
+        if has_cookies:
             cookies = st.context.cookies
             cookie_dict = cookies.to_dict() if hasattr(cookies, 'to_dict') else dict(cookies)
             
             try:
                 log_auth("DEBUG", "쿠키 확인 (context)", 
                         available_cookies=list(cookie_dict.keys()),
-                        has_auth_cookie='auth_admin_id' in cookie_dict)
+                        has_auth_cookie='auth_admin_id' in cookie_dict,
+                        cookie_dict_keys=str(list(cookie_dict.keys())))
             except:
                 pass  # 로그 기록 실패해도 계속 진행
             
@@ -106,39 +128,30 @@ def restore_auth_from_cookie():
                     except:
                         pass  # 로그 기록 실패해도 계속 진행
                     return True
-        
-        # 방법 2: JavaScript를 통한 쿠키 읽기 (서버 환경 대응)
-        # 쿠키를 읽기 위한 JavaScript 실행
-        cookie_read_script = """
-        <script>
-        function getCookie(name) {
-            var nameEQ = name + "=";
-            var ca = document.cookie.split(';');
-            for(var i = 0; i < ca.length; i++) {
-                var c = ca[i];
-                while (c.charAt(0) == ' ') c = c.substring(1, c.length);
-                if (c.indexOf(nameEQ) == 0) {
-                    return c.substring(nameEQ.length, c.length);
-                }
-            }
-            return null;
-        }
-        var authId = getCookie("auth_admin_id");
-        if (authId) {
-            window.parent.postMessage({
-                type: 'streamlit:setComponentValue',
-                value: {cookie_auth_id: authId}
-            }, '*');
-        }
-        </script>
-        """
-        # 이 방법은 복잡하므로, 일단 context 방법만 사용
+            else:
+                try:
+                    log_auth("DEBUG", "쿠키에 auth_admin_id 없음", 
+                            available_cookies=list(cookie_dict.keys()))
+                except:
+                    pass
+        else:
+            try:
+                log_auth("WARNING", "st.context.cookies 접근 불가", 
+                        has_context=has_context,
+                        has_cookies=has_cookies)
+            except:
+                pass
         
     except Exception as e:
         try:
-            log_error("WARNING", "쿠키에서 인증 정보 복원 실패", exception=e)
+            log_error("ERROR", "쿠키에서 인증 정보 복원 실패", exception=e, traceback_str=str(e))
         except:
             pass  # 로그 기록 실패해도 계속 진행
+    
+    try:
+        log_auth("DEBUG", "쿠키 복원 실패 - 로그인 페이지로 이동")
+    except:
+        pass
     
     return False
 
