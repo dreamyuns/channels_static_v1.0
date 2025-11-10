@@ -67,7 +67,10 @@ st.set_page_config(
 def restore_auth_from_cookie():
     """쿠키에서 인증 정보를 읽어 세션 상태에 복원"""
     # 로그아웃 중이면 복원하지 않음
+    # 단, 로그아웃 플래그는 로그아웃 버튼 클릭 시에만 설정되므로
+    # 새로고침 시에는 플래그가 없어야 함
     if st.session_state.get('_logout_in_progress', False):
+        log_auth("DEBUG", "로그아웃 진행 중 - 쿠키 복원 건너뜀")
         return False
     
     try:
@@ -81,10 +84,14 @@ def restore_auth_from_cookie():
             
             if 'auth_admin_id' in cookie_dict:
                 admin_id = cookie_dict.get('auth_admin_id')
+                # 인증 상태가 없거나, 세션 상태가 비어있으면 복원
                 if admin_id and not is_authenticated(st.session_state):
                     # 세션 상태가 비어있고 쿠키에 인증 정보가 있으면 복원
                     st.session_state.authenticated = True
                     st.session_state.admin_id = admin_id
+                    # 로그아웃 플래그가 있다면 삭제 (새로고침 시 정상 복원을 위해)
+                    if '_logout_in_progress' in st.session_state:
+                        del st.session_state['_logout_in_progress']
                     log_auth("INFO", "쿠키에서 인증 정보 복원", admin_id=admin_id)
                     return True
             else:
