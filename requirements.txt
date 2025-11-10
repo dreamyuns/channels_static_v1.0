@@ -17,8 +17,8 @@ plotly==5.18.0
 pytz==2023.3
 
 # SSH 터널 (선택사항)
-sshtunnel==0.4.3
-paramiko>=2.9.0,<3.0.0
+sshtunnel==0.4.0
+paramiko==2.12.0
 
 # 인증 (v1.6)
 bcrypt==4.1.2

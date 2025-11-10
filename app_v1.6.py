@@ -139,6 +139,10 @@ if not is_auth_result:
                     st.session_state.authenticated = True
                     st.session_state.admin_id = auth_result['admin_id']
                     
+                    # 로그아웃 플래그 삭제 (로그인 성공 시)
+                    if '_logout_in_progress' in st.session_state:
+                        del st.session_state['_logout_in_progress']
+                    
                     # 쿠키에 인증 정보 저장 (새로고침 문제 해결)
                     # JavaScript를 사용하여 쿠키 설정
                     admin_id = auth_result['admin_id']
@@ -205,7 +209,7 @@ with col_header1:
     st.title("📊 채널별 예약 통계 시스템")
 with col_header2:
     if st.button("🚪 로그아웃", type="secondary", use_container_width=True):
-        # 로그아웃 플래그 설정 (쿠키 복원 방지)
+        # 로그아웃 플래그 설정 (쿠키 복원 방지) - 삭제하지 않고 유지
         st.session_state['_logout_in_progress'] = True
         
         # 세션 상태 먼저 삭제
@@ -218,17 +222,13 @@ with col_header2:
         document.cookie = "auth_admin_id=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
         // 페이지 강제 리로드하여 로그인 페이지로 이동
         setTimeout(function() {
-            window.location.reload(true);
+            window.location.href = window.location.pathname;
         }, 100);
         </script>
         """
         st.components.v1.html(cookie_script, height=0)
         
-        # 로그아웃 플래그도 삭제 (다음 요청에서 정상 동작하도록)
-        if '_logout_in_progress' in st.session_state:
-            del st.session_state['_logout_in_progress']
-        
-        # st.rerun()도 호출 (이중 안전장치)
+        # st.rerun() 호출하여 즉시 로그인 페이지로 이동
         st.rerun()
 
 st.markdown("---")
@@ -416,11 +416,9 @@ should_show_result = search_button or has_search_result
 if should_show_result:
     # 조회 버튼이 클릭된 경우에만 새로 조회
     if search_button:
-        # 데이터 조회 (로딩 표시 개선: st.status 사용)
-        status = st.status("🔄 데이터를 조회하는 중...", expanded=True, state="running")
-        
+        # 데이터 조회 (로딩 표시: st.spinner 사용 - 접기/펼치기 없음)
         try:
-            with status:
+            with st.spinner("🔄 데이터를 조회하는 중..."):
                 # 채널별 데이터 조회 (쿼리용 채널 리스트 사용)
                 # 채널 목록 다시 가져오기
                 channel_list_for_query = get_cached_channel_list()
@@ -463,16 +461,12 @@ if should_show_result:
                 # 로깅: 데이터 조회 완료
                 log_access("INFO", "데이터 조회 완료", admin_id=admin_id, 
                           결과건수=len(df))
-            
-            # 로딩 완료 상태 변경
-            status.update(label="✅ 데이터 조회 완료", state="complete", expanded=False)
                 
         except Exception as e:
             # 에러 로깅
             log_error("ERROR", "데이터 조회 중 오류 발생", exception=e, admin_id=admin_id,
                      기간=f"{start_date}~{end_date}", 채널=",".join(selected_channels))
             
-            status.update(label="❌ 데이터 조회 실패", state="error", expanded=False)
             st.error(f"❌ 데이터 조회 중 오류가 발생했습니다: {e}")
             st.exception(e)
             
@@ -510,26 +504,6 @@ if should_show_result:
         st.warning("⚠️ 조회된 데이터가 없습니다.")
         st.info("다른 날짜 범위, 날짜유형 또는 채널을 선택해보세요.")
     else:
-        # 사용안내 (접기/펼치기)
-        with st.expander("📌 사용 안내", expanded=False):
-            st.markdown("""
-            **사용 방법:**
-            1. **날짜유형 선택**: 이용일 또는 구매일 기준을 선택하세요
-            2. **날짜 범위 선택**: 시작일과 종료일을 선택하세요 (최대 3개월)
-               - 이용일 기준: 오늘 기준 90일 전 ~ 90일 후까지 선택 가능
-               - 구매일 기준: 오늘 기준 90일 전 ~ 어제까지 선택 가능
-            3. **채널 선택**: 조회할 채널을 선택하세요 (여러 개 선택 가능)
-            4. **조회**: '조회' 버튼을 클릭하여 데이터를 조회합니다
-            5. **초기화**: '초기화' 버튼을 클릭하여 모든 필터를 기본값으로 되돌립니다
-            6. **엑셀 다운로드**: 조회 결과를 엑셀 파일로 다운로드할 수 있습니다
-            
-            **주의사항:**
-            - 구매일 기준 조회 시 당일 데이터는 조회할 수 없습니다 (D-1까지만 조회 가능)
-            - 조회 기간은 최대 90일(3개월)까지 가능합니다
-            - 상세 데이터는 상위 10개만 표시되며, 전체 데이터는 엑셀 다운로드를 이용하세요
-            - 예약상태는 상세 데이터에서 확인할 수 있습니다 (확정/취소 객실수, 취소율)
-            """)
-        
         # 요약 통계 표시
         st.subheader("📈 요약 통계")
         
@@ -687,6 +661,27 @@ if should_show_result:
         except Exception as e:
             log_error("ERROR", "엑셀 다운로드 실패", exception=e, admin_id=admin_id)
             st.error(f"❌ 엑셀 다운로드 중 오류가 발생했습니다: {e}")
+        
+        # 사용안내 (엑셀 다운로드 하단에 위치)
+        st.markdown("---")
+        with st.expander("📌 사용 안내", expanded=False):
+            st.markdown("""
+            **사용 방법:**
+            1. **날짜유형 선택**: 이용일 또는 구매일 기준을 선택하세요
+            2. **날짜 범위 선택**: 시작일과 종료일을 선택하세요 (최대 3개월)
+               - 이용일 기준: 오늘 기준 90일 전 ~ 90일 후까지 선택 가능
+               - 구매일 기준: 오늘 기준 90일 전 ~ 어제까지 선택 가능
+            3. **채널 선택**: 조회할 채널을 선택하세요 (여러 개 선택 가능)
+            4. **조회**: '조회' 버튼을 클릭하여 데이터를 조회합니다
+            5. **초기화**: '초기화' 버튼을 클릭하여 모든 필터를 기본값으로 되돌립니다
+            6. **엑셀 다운로드**: 조회 결과를 엑셀 파일로 다운로드할 수 있습니다
+            
+            **주의사항:**
+            - 구매일 기준 조회 시 당일 데이터는 조회할 수 없습니다 (D-1까지만 조회 가능)
+            - 조회 기간은 최대 90일(3개월)까지 가능합니다
+            - 상세 데이터는 상위 10개만 표시되며, 전체 데이터는 엑셀 다운로드를 이용하세요
+            - 예약상태는 상세 데이터에서 확인할 수 있습니다 (확정/취소 객실수, 취소율)
+            """)
 
 else:
     # 초기 화면: 사용 안내
