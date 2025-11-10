@@ -70,35 +70,76 @@ def restore_auth_from_cookie():
     # 단, 로그아웃 플래그는 로그아웃 버튼 클릭 시에만 설정되므로
     # 새로고침 시에는 플래그가 없어야 함
     if st.session_state.get('_logout_in_progress', False):
-        log_auth("DEBUG", "로그아웃 진행 중 - 쿠키 복원 건너뜀")
+        try:
+            log_auth("DEBUG", "로그아웃 진행 중 - 쿠키 복원 건너뜀")
+        except:
+            pass  # 로그 기록 실패해도 계속 진행
         return False
     
+    # 이미 인증되어 있으면 복원 불필요
+    if is_authenticated(st.session_state):
+        return True
+    
     try:
+        # 방법 1: st.context.cookies 사용
         if hasattr(st, 'context') and hasattr(st.context, 'cookies'):
             cookies = st.context.cookies
             cookie_dict = cookies.to_dict() if hasattr(cookies, 'to_dict') else dict(cookies)
             
-            log_auth("DEBUG", "쿠키 확인", 
-                    available_cookies=list(cookie_dict.keys()),
-                    has_auth_cookie='auth_admin_id' in cookie_dict)
+            try:
+                log_auth("DEBUG", "쿠키 확인 (context)", 
+                        available_cookies=list(cookie_dict.keys()),
+                        has_auth_cookie='auth_admin_id' in cookie_dict)
+            except:
+                pass  # 로그 기록 실패해도 계속 진행
             
             if 'auth_admin_id' in cookie_dict:
                 admin_id = cookie_dict.get('auth_admin_id')
-                # 인증 상태가 없거나, 세션 상태가 비어있으면 복원
-                if admin_id and not is_authenticated(st.session_state):
-                    # 세션 상태가 비어있고 쿠키에 인증 정보가 있으면 복원
+                if admin_id:
                     st.session_state.authenticated = True
                     st.session_state.admin_id = admin_id
                     # 로그아웃 플래그가 있다면 삭제 (새로고침 시 정상 복원을 위해)
                     if '_logout_in_progress' in st.session_state:
                         del st.session_state['_logout_in_progress']
-                    log_auth("INFO", "쿠키에서 인증 정보 복원", admin_id=admin_id)
+                    try:
+                        log_auth("INFO", "쿠키에서 인증 정보 복원 (context)", admin_id=admin_id)
+                    except:
+                        pass  # 로그 기록 실패해도 계속 진행
                     return True
-            else:
-                log_auth("DEBUG", "쿠키에 auth_admin_id 없음", 
-                        available_cookies=list(cookie_dict.keys()))
+        
+        # 방법 2: JavaScript를 통한 쿠키 읽기 (서버 환경 대응)
+        # 쿠키를 읽기 위한 JavaScript 실행
+        cookie_read_script = """
+        <script>
+        function getCookie(name) {
+            var nameEQ = name + "=";
+            var ca = document.cookie.split(';');
+            for(var i = 0; i < ca.length; i++) {
+                var c = ca[i];
+                while (c.charAt(0) == ' ') c = c.substring(1, c.length);
+                if (c.indexOf(nameEQ) == 0) {
+                    return c.substring(nameEQ.length, c.length);
+                }
+            }
+            return null;
+        }
+        var authId = getCookie("auth_admin_id");
+        if (authId) {
+            window.parent.postMessage({
+                type: 'streamlit:setComponentValue',
+                value: {cookie_auth_id: authId}
+            }, '*');
+        }
+        </script>
+        """
+        # 이 방법은 복잡하므로, 일단 context 방법만 사용
+        
     except Exception as e:
-        log_error("WARNING", "쿠키에서 인증 정보 복원 실패", exception=e)
+        try:
+            log_error("WARNING", "쿠키에서 인증 정보 복원 실패", exception=e)
+        except:
+            pass  # 로그 기록 실패해도 계속 진행
+    
     return False
 
 # 쿠키에서 인증 정보 복원 시도
@@ -114,10 +155,13 @@ debug_info = {
 }
 is_auth_result = is_authenticated(st.session_state)
 
-# 디버깅 로그
-log_auth("INFO", "인증 상태 체크", 
-         is_authenticated=is_auth_result,
-         debug_info=str(debug_info))
+# 디버깅 로그 (로그 기록 실패해도 계속 진행)
+try:
+    log_auth("INFO", "인증 상태 체크", 
+             is_authenticated=is_auth_result,
+             debug_info=str(debug_info))
+except:
+    pass  # 로그 기록 실패해도 계속 진행
 
 # 인증 상태 확인
 if not is_auth_result:
@@ -151,9 +195,9 @@ if not is_auth_result:
                         del st.session_state['_logout_in_progress']
                     
                     # 쿠키에 인증 정보 저장 (새로고침 문제 해결)
-                    # JavaScript를 사용하여 쿠키 설정
+                    # JavaScript를 사용하여 쿠키 설정 (서버 환경 대응)
                     admin_id = auth_result['admin_id']
-                    # 쿠키 설정 스크립트 (더 명확하게)
+                    # 쿠키 설정 스크립트 (더 명확하게, 서버 환경 고려)
                     cookie_script = f"""
                     <script>
                     function setCookie(name, value, days) {{
@@ -163,8 +207,19 @@ if not is_auth_result:
                             date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
                             expires = "; expires=" + date.toUTCString();
                         }}
-                        document.cookie = name + "=" + value + expires + "; path=/; SameSite=Lax";
+                        // 서버 환경 대응: Secure 플래그는 HTTPS에서만, SameSite 설정
+                        var cookieString = name + "=" + value + expires + "; path=/; SameSite=Lax";
+                        // HTTPS 환경에서는 Secure 플래그 추가 (자동 감지)
+                        if (window.location.protocol === 'https:') {{
+                            cookieString += "; Secure";
+                        }}
+                        document.cookie = cookieString;
                         console.log("Cookie set: " + name + "=" + value);
+                        // 쿠키 설정 확인
+                        setTimeout(function() {{
+                            var checkCookie = document.cookie.indexOf(name + "=");
+                            console.log("Cookie check: " + (checkCookie >= 0 ? "OK" : "FAILED"));
+                        }}, 100);
                     }}
                     setCookie("auth_admin_id", "{admin_id}", 1);
                     </script>
