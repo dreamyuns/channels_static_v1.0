@@ -1,13 +1,16 @@
-# utils/excel_handler_v1.3.py
-"""엑셀 파일 생성 및 다운로드 처리 v1.3 - 확정/취소 객실수, 취소율 추가"""
+# utils/excel_handler_hotel.py
+"""숙소별 엑셀 파일 생성 및 다운로드 처리
+- 날짜별 + 숙소별 + 채널별 집계
+- order_item.due_price 사용 (입금가)
+"""
 
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
 
-def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type='orderDate'):
+def create_hotel_excel_file(df, summary_stats=None, sheet_name='구매일', date_type='orderDate'):
     """
-    DataFrame을 엑셀 파일로 변환
+    숙소별 DataFrame을 엑셀 파일로 변환
     
     Args:
         df: pandas DataFrame (조회 결과 데이터)
@@ -30,8 +33,8 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
                 '항목': '총 입금가',
                 '값': f"{summary_stats.get('total_revenue', 0):,.0f}"
             }, {
-                '항목': '조회 채널 수',
-                '값': f"{summary_stats.get('channel_count', 0)}개"
+                '항목': '조회 숙소 수',
+                '값': f"{summary_stats.get('hotel_count', 0)}개"
             }, {
                 '항목': '조회 기간',
                 '값': f"{summary_stats.get('start_date', '')} ~ {summary_stats.get('end_date', '')}"
@@ -55,9 +58,10 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
             # 컬럼명 한글화 및 순서 정리
             column_mapping = {
                 'booking_date': date_col_name,
+                'hotel_name': '숙소명',
+                'hotel_code': '숙소코드',
                 'channel_name': '채널명',
                 'channel_code': '채널코드',  # 내부용, 필요시 숨김 가능
-                'hotel_count': '판매숙소수',
                 'booking_count': '예약건수',
                 'total_rooms': '총객실수',
                 'confirmed_rooms': '확정객실수',
@@ -73,11 +77,12 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
             existing_cols = {k: v for k, v in column_mapping.items() if k in export_df.columns}
             export_df.rename(columns=existing_cols, inplace=True)
             
-            # 컬럼 순서 정리 (요청된 순서대로)
+            # 컬럼 순서 정리
             desired_order = [
                 date_col_name,
+                '숙소명',
+                '숙소코드',
                 '채널명',
-                '판매숙소수',
                 '예약건수',
                 '총객실수',
                 '확정객실수',
@@ -91,10 +96,6 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
             
             # 존재하는 컬럼만 선택
             final_cols = [col for col in desired_order if col in export_df.columns]
-            # 채널코드는 제외 (필요시 나중에 추가 가능)
-            if '채널코드' in export_df.columns and '채널코드' not in final_cols:
-                pass  # 채널코드는 제외
-            
             export_df = export_df[final_cols]
             
             # 날짜 포맷팅
@@ -102,7 +103,7 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
                 export_df[date_col_name] = pd.to_datetime(export_df[date_col_name]).dt.strftime('%Y-%m-%d')
             
             # 숫자 포맷팅 (천단위 구분, 숫자만 표시)
-            numeric_cols = ['판매숙소수', '예약건수', '총객실수', '확정객실수', '취소객실수', '총 입금가', '총 실구매가', '총 수익']
+            numeric_cols = ['예약건수', '총객실수', '확정객실수', '취소객실수', '총 입금가', '총 실구매가', '총 수익']
             for col in numeric_cols:
                 if col in export_df.columns:
                     export_df[col] = export_df[col].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
@@ -128,7 +129,9 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
                     export_df[col].astype(str).apply(len).max(),
                     len(str(col))
                 )
-                worksheet.column_dimensions[chr(64 + idx)].width = min(max_length + 2, 50)
+                # 열 인덱스를 알파벳으로 변환 (A, B, C, ...)
+                col_letter = chr(64 + idx) if idx <= 26 else chr(64 + (idx - 1) // 26) + chr(64 + ((idx - 1) % 26) + 1)
+                worksheet.column_dimensions[col_letter].width = min(max_length + 2, 50)
         else:
             # 데이터가 없을 때 빈 시트 생성
             empty_df = pd.DataFrame({'메시지': ['조회된 데이터가 없습니다.']})
@@ -137,9 +140,9 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
     output.seek(0)
     return output
 
-def create_excel_download(df, summary_stats=None, filename=None, date_type='orderDate'):
+def create_hotel_excel_download(df, summary_stats=None, filename=None, date_type='orderDate'):
     """
-    Streamlit용 엑셀 다운로드 파일 생성
+    Streamlit용 숙소별 엑셀 다운로드 파일 생성
     
     Args:
         df: pandas DataFrame
@@ -155,11 +158,12 @@ def create_excel_download(df, summary_stats=None, filename=None, date_type='orde
     
     # 파일명 생성
     if filename is None:
-        today = datetime.now().strftime('%Y%m%d')
-        date_type_kr = '구매일' if date_type == 'orderDate' else '이용일'
-        filename = f'채널별예약통계_{date_type_kr}_{today}.xlsx'
+        now = datetime.now()
+        date_str = now.strftime('%Y%m%d')
+        time_str = now.strftime('%H%M%S')
+        filename = f'숙소별_예약통계_{date_str}_{time_str}.xlsx'
     
-    excel_file = create_excel_file(df, summary_stats, sheet_name, date_type)
+    excel_file = create_hotel_excel_file(df, summary_stats, sheet_name, date_type)
     
     return excel_file.getvalue(), filename
 
