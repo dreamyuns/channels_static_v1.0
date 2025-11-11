@@ -1,9 +1,13 @@
-# app_v1.6.py
-"""채널별 예약 통계 시스템 - Streamlit 메인 애플리케이션 v1.6
+# app_v1.1_hotel.py
+"""숙소별 예약 통계 시스템 - Streamlit 메인 애플리케이션 v1.1
 - 인증 기능 추가 (tblmanager 테이블 기반)
 - 로깅 기능 추가 (타입별 로그 파일 분리)
 - 로딩 표시 개선 (st.status 사용)
-- 세션 타임아웃 관리 (1시간, 5분 전 경고)
+- 숙소 검색 기능 (자동완성)
+- v1.1 변경사항:
+  - 검색 버튼 삭제, 엔터키로만 검색
+  - 선택된 숙소는 셀렉트박스 옵션에서 제외 (중복 선택 방지)
+  - 선택 후 셀렉트박스 비우기
 """
 
 import streamlit as st
@@ -24,27 +28,14 @@ from utils.auth import (
     logout
 )
 
-# v1.5 모듈 import
-_data_fetcher_path = os.path.join(os.path.dirname(__file__), 'utils', 'data_fetcher_v1.5.py')
-spec = importlib.util.spec_from_file_location("data_fetcher_v1_5", _data_fetcher_path)
-data_fetcher_v1_5 = importlib.util.module_from_spec(spec)
-sys.modules["data_fetcher_v1_5"] = data_fetcher_v1_5
-spec.loader.exec_module(data_fetcher_v1_5)
+# 숙소 검색 모듈 import
+from utils.hotel_search import search_hotels, get_hotel_by_id
 
-from data_fetcher_v1_5 import (  # type: ignore
-    fetch_channel_data,
-    fetch_summary_stats,
-    fetch_channel_list
-)
+# 숙소별 데이터 조회 모듈 import
+from utils.data_fetcher_hotel import fetch_hotel_data, fetch_hotel_summary_stats
 
-# v1.5 excel_handler 동적 import (점이 포함된 파일명)
-_excel_handler_path = os.path.join(os.path.dirname(__file__), 'utils', 'excel_handler_v1.5.py')
-spec_excel = importlib.util.spec_from_file_location("excel_handler_v1_5", _excel_handler_path)
-excel_handler_v1_5 = importlib.util.module_from_spec(spec_excel)
-sys.modules["excel_handler_v1_5"] = excel_handler_v1_5
-spec_excel.loader.exec_module(excel_handler_v1_5)
-
-from excel_handler_v1_5 import create_excel_download  # type: ignore
+# 숙소별 엑셀 핸들러 import
+from utils.excel_handler_hotel import create_hotel_excel_download
 
 from config.master_data_loader import (
     get_date_type_options,
@@ -53,11 +44,45 @@ from config.master_data_loader import (
 
 # 페이지 설정
 st.set_page_config(
-    page_title="채널별 예약 통계",
-    page_icon="📊",
+    page_title="숙소별 예약 통계",
+    page_icon="🏨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# 사이드바 너비 1.5배 CSS
+sidebar_css = """
+<style>
+    /* 사이드바 너비 1.5배 */
+    .css-1d391kg {
+        width: 450px !important;
+    }
+    [data-testid="stSidebar"] {
+        width: 450px !important;
+    }
+    
+    /* 숙소명 표시 (8자 제한, 12px) */
+    .hotel-name-display {
+        font-size: 12px;
+        max-width: 100px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    
+    /* 검색 결과 텍스트 링크 스타일 (밑줄 효과) */
+    .search-result-link {
+        text-decoration: underline;
+        color: #1f77b4;
+        cursor: pointer;
+    }
+    
+    .search-result-link:hover {
+        color: #0d5aa7;
+    }
+</style>
+"""
+st.markdown(sidebar_css, unsafe_allow_html=True)
 
 # ============================================
 # 인증 체크 및 로그인 페이지
@@ -351,11 +376,10 @@ if not is_auth_result:
                 st.error("⚠️ ID와 비밀번호를 입력해주세요.")
     
     st.markdown("---")
-    st.caption("채널별 예약 통계 시스템 v1.6 | 로그인이 필요합니다")
+    st.caption("숙소별 예약 통계 시스템 v1.1 | 로그인이 필요합니다")
     st.stop()
 
 # 인증된 사용자만 여기까지 도달
-# 세션 타임아웃 체크 제거됨 (새로고침 문제 해결)
 
 # 디버깅: 인증된 사용자 접근 확인
 log_auth("INFO", "인증된 사용자 접근", 
@@ -370,7 +394,7 @@ log_auth("INFO", "인증된 사용자 접근",
 # 헤더 (제목 + 로그아웃 버튼)
 col_header1, col_header2 = st.columns([10, 1])
 with col_header1:
-    st.title("📊 채널별 예약 통계 시스템")
+    st.title("🏨 숙소별 예약 통계 시스템")
 with col_header2:
     if st.button("🚪 로그아웃", type="secondary", use_container_width=True):
         # 로그아웃 플래그 설정 (쿠키 복원 방지) - 삭제하지 않고 유지
@@ -408,6 +432,13 @@ default_date_type = 'orderDate'  # 구매일이 기본값
 # 예약상태는 항상 '전체'로 고정
 order_status = '전체'
 
+# 숙소명 표시 함수 (8자 제한, 말줄임표)
+def format_hotel_name(name, max_length=8):
+    """숙소명을 최대 길이로 제한하고 말줄임표 추가"""
+    if len(name) <= max_length:
+        return name
+    return name[:max_length] + "..."
+
 # 사이드바: 검색 조건
 with st.sidebar:
     st.header("🔍 검색 조건")
@@ -437,8 +468,10 @@ with st.sidebar:
         st.session_state.start_date = default_start
     if 'end_date' not in st.session_state:
         st.session_state.end_date = default_end
-    if 'selected_channels' not in st.session_state:
-        st.session_state.selected_channels = ['전체']
+    if 'selected_hotels' not in st.session_state:
+        st.session_state.selected_hotels = []
+    if 'search_term' not in st.session_state:
+        st.session_state.search_term = ''
     
     # 세션 상태에서 날짜유형 인덱스 찾기
     date_type_index = 0
@@ -510,50 +543,134 @@ with st.sidebar:
     
     st.info(f"📅 조회 기간: {days_diff}일")
     
-    # 채널 선택
-    st.subheader("채널 선택")
+    # 숙소 검색
+    st.subheader("숙소 검색")
     
-    # 채널 목록을 캐싱하여 DB 연결 부하 감소
-    @st.cache_data(ttl=3600)  # 1시간 캐시
-    def get_cached_channel_list():
-        try:
-            return fetch_channel_list()
-        except Exception as e:
-            st.error(f"❌ 채널 목록 조회 실패: {e}")
-            log_error("ERROR", "채널 목록 조회 실패", exception=e, admin_id=admin_id)
-            return ['전체']  # 기본값 반환
+    # 검색 입력창 (검색 버튼 삭제, 엔터키로만 검색)
+    search_term = st.text_input(
+        "숙소명 or 숙소코드를 입력해주세요",
+        value=st.session_state.search_term,
+        placeholder="숙소명 or 숙소코드를 입력해주세요.",
+        help="검색어를 입력한 후 엔터 키를 눌러주세요.",
+        key='hotel_search_input',
+        label_visibility="collapsed"
+    )
     
-    try:
-        channel_list = get_cached_channel_list()
+    # 검색 결과 표시 (엔터 키 입력 시에만)
+    search_results = []
+    if 'search_results' not in st.session_state:
+        st.session_state.search_results = []
+    if 'last_search_term' not in st.session_state:
+        st.session_state.last_search_term = ''
+    
+    # 검색 실행 조건: 검색어 변경 (엔터 키 입력 시)
+    # Streamlit에서 text_input에 엔터를 누르면 자동으로 rerun되므로, 검색어 변경을 감지
+    search_term_changed = search_term != st.session_state.last_search_term
+    
+    if search_term_changed:
+        if search_term and len(search_term.strip()) >= 2:
+            with st.spinner("🔍 검색 중..."):
+                search_results = search_hotels(search_term.strip(), limit=15)
+                st.session_state.search_results = search_results
+                st.session_state.last_search_term = search_term.strip()  # 공백 제거하여 저장
+        else:
+            if search_term and len(search_term.strip()) < 2:
+                st.warning("⚠️ 검색어를 2자 이상 입력해주세요.")
+            st.session_state.search_results = []
+            st.session_state.last_search_term = search_term.strip() if search_term else ''
+    else:
+        # 이전 검색 결과 유지
+        search_results = st.session_state.search_results
+    
+    # 세션 상태에 검색어 저장
+    st.session_state.search_term = search_term
+    
+    # 검색 결과를 multiselect 형태로 표시 (선택된 숙소도 포함)
+    if search_results:
+        # 이미 선택된 숙소의 idx 목록 (중복 선택 방지)
+        selected_hotel_indices = {h.get('idx') for h in st.session_state.selected_hotels if h.get('idx')}
         
-        if not channel_list or channel_list == ['전체']:
-            st.warning("⚠️ 채널 목록을 불러올 수 없습니다. 기본 채널만 사용됩니다.")
-            channel_list = ['전체']
+        # 검색 결과를 옵션 리스트로 변환 (모든 검색 결과 포함)
+        hotel_options = []
+        hotel_dict = {}  # 옵션 라벨 -> hotel 객체 매핑
         
-        # 세션 상태에서 채널 기본값 설정
-        channel_default = st.session_state.selected_channels if 'selected_channels' in st.session_state else (['전체'] if '전체' in channel_list else [])
+        for hotel in search_results:
+            hotel_label = f"{hotel['name_kr']} ({hotel['product_code']})"
+            hotel_options.append(hotel_label)
+            hotel_dict[hotel_label] = hotel
         
-        selected_channels = st.multiselect(
-            "조회할 채널을 선택하세요",
-            options=channel_list,
-            default=channel_default,
-            help="여러 채널을 선택할 수 있습니다. '전체'를 선택하면 모든 채널이 조회됩니다.",
-            key='channel_select'
+        # 이미 선택된 숙소의 라벨 추출 (체크 상태로 유지)
+        selected_labels_in_results = []
+        for hotel in st.session_state.selected_hotels:
+            hotel_label = f"{hotel['name_kr']} ({hotel['product_code']})"
+            if hotel_label in hotel_options:
+                selected_labels_in_results.append(hotel_label)
+        
+        # multiselect로 표시 (선택된 항목은 default에 포함하여 체크 상태 유지)
+        selected_hotel_labels = st.multiselect(
+            "검색 결과에서 숙소를 선택하세요",
+            options=hotel_options,
+            default=selected_labels_in_results,  # 선택된 항목을 체크 상태로 유지
+            help="숙소를 선택해주세요 (2개 이상 선택 가능)",
+            key='hotel_search_multiselect',
+            placeholder="숙소를 선택해주세요 (2개 이상 선택 가능)"
         )
         
-        if not selected_channels:
-            st.warning("⚠️ 최소 1개 이상의 채널을 선택해주세요.")
-            st.stop()
+        # 선택된 숙소 업데이트
+        # 새로 선택된 숙소 추가
+        for label in selected_hotel_labels:
+            if label not in selected_labels_in_results:
+                hotel = hotel_dict[label]
+                # 중복 확인 (이미 선택된 숙소인지)
+                if not any(h.get('idx') == hotel['idx'] for h in st.session_state.selected_hotels):
+                    # 최대 10개 제한
+                    if len(st.session_state.selected_hotels) < 10:
+                        st.session_state.selected_hotels.append(hotel)
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ 최대 10개까지 선택 가능합니다.")
+                        st.rerun()
         
-        # 세션 상태에 원본 선택값 저장 (쿼리 실행 전)
-        st.session_state.selected_channels = selected_channels
-        
-    except Exception as e:
-        st.error(f"❌ 채널 목록 조회 오류: {e}")
-        log_error("ERROR", "채널 목록 조회 오류", exception=e, admin_id=admin_id)
-        st.stop()
+        # 선택 해제된 숙소 제거
+        for label in selected_labels_in_results:
+            if label not in selected_hotel_labels:
+                hotel = hotel_dict[label]
+                st.session_state.selected_hotels = [h for h in st.session_state.selected_hotels if h.get('idx') != hotel['idx']]
+                st.rerun()
     
-    # 예약상태 필터 제거됨 (UI에서 숨김, 백엔드는 항상 '전체'로 고정)
+    # 선택한 숙소 목록 (체크박스 형태, 체크 해제 시 삭제)
+    if st.session_state.selected_hotels:
+        st.markdown("---")
+        st.write("**선택한 숙소 목록:**")
+        
+        # 선택된 숙소를 체크박스 형태로 표시
+        hotels_to_remove = []
+        
+        for i, hotel in enumerate(st.session_state.selected_hotels):
+            hotel_name = hotel.get('name_kr', 'Unknown')
+            hotel_name_short = format_hotel_name(hotel_name, max_length=8)
+            hotel_label = f"🏨 {hotel_name_short}"
+            
+            # 체크박스 (기본값: True, 체크 해제 시 삭제)
+            is_checked = st.checkbox(
+                hotel_label,
+                value=True,
+                key=f"hotel_checkbox_{hotel.get('idx')}_{i}",
+                help=f"{hotel_name} (클릭하여 선택 해제)"
+            )
+            
+            # 체크 해제 시 삭제 목록에 추가
+            if not is_checked:
+                hotels_to_remove.append(i)
+        
+        # 삭제 처리
+        if hotels_to_remove:
+            for idx in sorted(hotels_to_remove, reverse=True):
+                removed_hotel = st.session_state.selected_hotels.pop(idx)
+                st.info(f"✅ '{removed_hotel.get('name_kr', 'Unknown')}' 선택 해제됨")
+            st.rerun()
+    else:
+        st.warning("⚠️ 최소 1개 이상의 숙소를 선택해주세요.")
     
     # 조회 및 초기화 버튼
     st.markdown("---")
@@ -568,8 +685,9 @@ with st.sidebar:
         st.session_state.date_type = default_date_type
         st.session_state.start_date = default_start
         st.session_state.end_date = default_end
-        st.session_state.selected_channels = ['전체']
-        # 초기화 시 필터만 초기화하고 결과 화면은 유지 (저장된 결과는 삭제하지 않음)
+        st.session_state.selected_hotels = []
+        st.session_state.search_term = ''
+        st.session_state.last_search_result = None
         st.rerun()
 
 # 메인 영역
@@ -580,32 +698,40 @@ should_show_result = search_button or has_search_result
 if should_show_result:
     # 조회 버튼이 클릭된 경우에만 새로 조회
     if search_button:
+        # 선택된 숙소 확인
+        if not st.session_state.selected_hotels:
+            st.error("⚠️ 최소 1개 이상의 숙소를 선택해주세요.")
+            st.stop()
+        
+        # 선택된 숙소 ID 리스트 추출
+        selected_hotel_ids = [hotel.get('idx') for hotel in st.session_state.selected_hotels if hotel.get('idx')]
+        
+        if not selected_hotel_ids:
+            st.error("⚠️ 선택된 숙소가 없습니다. 숙소를 선택해주세요.")
+            st.stop()
+        
         # 데이터 조회 (로딩 표시: st.spinner 사용 - 접기/펼치기 없음)
         try:
             with st.spinner("🔄 데이터를 조회하는 중..."):
-                # 채널별 데이터 조회 (쿼리용 채널 리스트 사용)
-                # 채널 목록 다시 가져오기
-                channel_list_for_query = get_cached_channel_list()
-                query_channels = channel_list_for_query[1:] if '전체' in selected_channels else selected_channels
-                
                 # 로깅: 데이터 조회 시작
-                log_access("INFO", "데이터 조회 시작", admin_id=admin_id, 
+                log_access("INFO", "숙소별 데이터 조회 시작", admin_id=admin_id, 
                           기간=f"{start_date}~{end_date}", 
-                          채널=",".join(selected_channels),
+                          숙소수=len(selected_hotel_ids),
                           날짜유형=date_type)
                 
-                df = fetch_channel_data(
+                df = fetch_hotel_data(
                     start_date=start_date,
                     end_date=end_date,
-                    selected_channels=query_channels,
+                    selected_hotel_ids=selected_hotel_ids,
                     date_type=date_type,
                     order_status='전체'  # 항상 '전체'로 고정
                 )
                 
                 # 요약 통계 조회
-                summary_stats = fetch_summary_stats(
+                summary_stats = fetch_hotel_summary_stats(
                     start_date, 
                     end_date, 
+                    selected_hotel_ids=selected_hotel_ids,
                     date_type=date_type,
                     order_status='전체'  # 항상 '전체'로 고정
                 )
@@ -617,19 +743,19 @@ if should_show_result:
                     'start_date': start_date,
                     'end_date': end_date,
                     'date_type': date_type,
-                    'order_status': '전체',  # 항상 '전체'
-                    'selected_channels': selected_channels,
+                    'order_status': '전체',
+                    'selected_hotel_ids': selected_hotel_ids,
                     'days_diff': days_diff
                 }
                 
                 # 로깅: 데이터 조회 완료
-                log_access("INFO", "데이터 조회 완료", admin_id=admin_id, 
+                log_access("INFO", "숙소별 데이터 조회 완료", admin_id=admin_id, 
                           결과건수=len(df))
                 
         except Exception as e:
             # 에러 로깅
-            log_error("ERROR", "데이터 조회 중 오류 발생", exception=e, admin_id=admin_id,
-                     기간=f"{start_date}~{end_date}", 채널=",".join(selected_channels))
+            log_error("ERROR", "숙소별 데이터 조회 중 오류 발생", exception=e, admin_id=admin_id,
+                     기간=f"{start_date}~{end_date}", 숙소수=len(selected_hotel_ids))
             
             st.error(f"❌ 데이터 조회 중 오류가 발생했습니다: {e}")
             st.exception(e)
@@ -638,7 +764,7 @@ if should_show_result:
             summary_stats = {
                 'total_bookings': 0,
                 'total_revenue': 0,
-                'channel_count': 0,
+                'hotel_count': 0,
                 'active_days': 0
             }
             st.session_state.last_search_result = None
@@ -659,14 +785,14 @@ if should_show_result:
             summary_stats = {
                 'total_bookings': 0,
                 'total_revenue': 0,
-                'channel_count': 0,
+                'hotel_count': 0,
                 'active_days': 0
             }
     
     # 결과 표시
     if df.empty:
         st.warning("⚠️ 조회된 데이터가 없습니다.")
-        st.info("다른 날짜 범위, 날짜유형 또는 채널을 선택해보세요.")
+        st.info("다른 날짜 범위, 날짜유형 또는 숙소를 선택해보세요.")
     else:
         # 요약 통계 표시
         st.subheader("📈 요약 통계")
@@ -725,8 +851,8 @@ if should_show_result:
         # 컬럼명 한글화 및 순서 정리
         column_mapping = {
             'booking_date': date_col_name,
+            'hotel_name': '숙소명',
             'channel_name': '채널명',
-            'hotel_count': '판매숙소수',
             'booking_count': '예약건수',
             'total_rooms': '총객실수',
             'confirmed_rooms': '확정객실수',
@@ -746,8 +872,8 @@ if should_show_result:
         # 컬럼 순서 정리
         desired_order = [
             date_col_name,
+            '숙소명',
             '채널명',
-            '판매숙소수',
             '예약건수',
             '총객실수',
             '확정객실수',
@@ -764,7 +890,7 @@ if should_show_result:
         display_df = display_df[final_cols]
         
         # 숫자 포맷팅 (천단위 구분, 숫자만 표시)
-        numeric_cols = ['판매숙소수', '예약건수', '총객실수', '확정객실수', '취소객실수', '총 입금가', '총 실구매가', '총 수익']
+        numeric_cols = ['예약건수', '총객실수', '확정객실수', '취소객실수', '총 입금가', '총 실구매가', '총 수익']
         for col in numeric_cols:
             if col in display_df.columns:
                 display_df[col] = display_df[col].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
@@ -806,7 +932,7 @@ if should_show_result:
         }
         
         try:
-            excel_data, filename = create_excel_download(
+            excel_data, filename = create_hotel_excel_download(
                 df=df,  # 전체 데이터 (엑셀에는 전체 포함)
                 summary_stats=summary_for_excel,
                 date_type=date_type
@@ -835,7 +961,7 @@ if should_show_result:
             2. **날짜 범위 선택**: 시작일과 종료일을 선택하세요 (최대 3개월)
                - 이용일 기준: 오늘 기준 90일 전 ~ 90일 후까지 선택 가능
                - 구매일 기준: 오늘 기준 90일 전 ~ 어제까지 선택 가능
-            3. **채널 선택**: 조회할 채널을 선택하세요 (여러 개 선택 가능)
+            3. **숙소 검색**: 숙소명 또는 숙소코드를 입력하여 검색하세요 (최대 10개 선택 가능)
             4. **조회**: '조회' 버튼을 클릭하여 데이터를 조회합니다
             5. **초기화**: '초기화' 버튼을 클릭하여 모든 필터를 기본값으로 되돌립니다
             6. **엑셀 다운로드**: 조회 결과를 엑셀 파일로 다운로드할 수 있습니다
@@ -855,7 +981,7 @@ else:
     st.markdown("""
     1. **날짜유형 선택**: 이용일 또는 구매일 기준을 선택하세요
     2. **날짜 범위 선택**: 시작일과 종료일을 선택하세요 (최대 3개월)
-    3. **채널 선택**: 조회할 채널을 선택하세요 (여러 개 선택 가능)
+    3. **숙소 검색**: 숙소명 또는 숙소코드를 입력하여 검색하세요 (최대 10개 선택 가능)
     4. **조회**: '조회' 버튼을 클릭하여 데이터를 조회합니다
     5. **초기화**: '초기화' 버튼을 클릭하여 모든 필터를 기본값으로 되돌립니다
     6. **엑셀 다운로드**: 조회 결과를 엑셀 파일로 다운로드할 수 있습니다
@@ -869,5 +995,5 @@ else:
 
 # 푸터
 st.markdown("---")
-st.caption("채널별 예약 통계 시스템 v1.6 | 개발 서버")
+st.caption("숙소별 예약 통계 시스템 v1.1 | 개발 서버")
 
