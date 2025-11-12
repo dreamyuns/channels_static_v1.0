@@ -8,8 +8,29 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 # 로그 디렉토리 설정
-_log_dir = Path(__file__).parent.parent / "logs"
-_log_dir.mkdir(exist_ok=True)
+# 환경 변수로 로그 디렉토리 경로를 설정할 수 있음 (운영서버 대응)
+_log_dir_env = os.environ.get('LOG_DIR')
+if _log_dir_env:
+    # 환경 변수가 설정된 경우 절대 경로로 사용
+    _log_dir = Path(_log_dir_env).resolve()
+else:
+    # 기본값: 프로젝트 루트의 logs 디렉토리
+    _log_dir = Path(__file__).parent.parent.resolve() / "logs"
+
+# 로그 디렉토리 생성 (실패 시 예외 처리)
+try:
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    # 디버깅: 로그 디렉토리 경로 확인 (초기화 시에만 출력)
+    if not hasattr(setup_logging, '_path_logged'):
+        print(f"[LOG] 로그 디렉토리: {_log_dir.absolute()}")
+        setup_logging._path_logged = True
+except Exception as e:
+    # 로그 디렉토리 생성 실패 시 임시 디렉토리 사용
+    import tempfile
+    _log_dir = Path(tempfile.gettempdir()) / "app_logs"
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[LOG WARNING] 원래 로그 디렉토리 생성 실패, 임시 디렉토리 사용: {_log_dir.absolute()}")
+    print(f"[LOG WARNING] 오류: {e}")
 
 # 로그 포맷
 LOG_FORMAT = "[%(asctime)s] [%(levelname)-8s] [%(category)s] %(message)s"
@@ -50,19 +71,36 @@ def _setup_logger(name: str, filename: str, category: str, level: int = logging.
     
     # 파일 핸들러 (일별 로테이션)
     log_file = _log_dir / filename
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=10 * 1024 * 1024,  # 10MB
-        backupCount=30,  # 30일 보관
-        encoding='utf-8'
-    )
-    file_handler.setLevel(level)
-    file_handler.addFilter(CategoryFilter(category))
-    
-    formatter = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
-    file_handler.setFormatter(formatter)
-    
-    logger.addHandler(file_handler)
+    try:
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=30,  # 30일 보관
+            encoding='utf-8'
+        )
+        file_handler.setLevel(level)
+        file_handler.addFilter(CategoryFilter(category))
+        
+        formatter = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
+        file_handler.setFormatter(formatter)
+        
+        logger.addHandler(file_handler)
+        
+        # 디버깅: 로그 파일 경로 확인 (최초 설정 시에만)
+        if not hasattr(_setup_logger, '_files_logged'):
+            print(f"[LOG] 로그 파일 생성: {log_file.absolute()}")
+            _setup_logger._files_logged = True
+    except Exception as e:
+        # 로그 파일 생성 실패 시 콘솔에 출력
+        print(f"[LOG ERROR] 로그 파일 생성 실패: {log_file.absolute()}")
+        print(f"[LOG ERROR] 오류: {e}")
+        # 콘솔 핸들러 추가 (파일 쓰기 실패 시 대안)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(level)
+        console_handler.addFilter(CategoryFilter(category))
+        formatter = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
     
     return logger
 
@@ -190,7 +228,12 @@ def setup_logging():
     _clean_old_logs(days=30)
     
     # 기본 로거 설정
-    log_app("INFO", "로깅 시스템 초기화 완료")
+    try:
+        log_app("INFO", f"로깅 시스템 초기화 완료 (로그 디렉토리: {_log_dir.absolute()})")
+    except Exception as e:
+        # 로그 기록 실패 시 콘솔에 출력
+        print(f"[LOG ERROR] 로깅 초기화 중 오류 발생: {e}")
+        print(f"[LOG] 로그 디렉토리: {_log_dir.absolute()}")
 
 
 if __name__ == "__main__":
