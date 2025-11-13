@@ -15,7 +15,27 @@ if _log_dir_env:
     _log_dir = Path(_log_dir_env).resolve()
 else:
     # 기본값: 프로젝트 루트의 logs 디렉토리
-    _log_dir = Path(__file__).parent.parent.resolve() / "logs"
+    # systemd 실행 시 __file__ 경로가 잘못될 수 있으므로, 현재 작업 디렉토리도 확인
+    try:
+        # 방법 1: __file__ 기준 (일반적인 경우)
+        _log_dir = Path(__file__).parent.parent.resolve() / "logs"
+        # 경로가 존재하지 않거나 이상한 경로인 경우 확인
+        if not _log_dir.exists() and str(_log_dir).startswith('/root'):
+            # /root 경로는 잘못된 경로일 가능성이 높음
+            raise ValueError("Invalid path detected")
+    except (ValueError, AttributeError):
+        # 방법 2: 현재 작업 디렉토리 기준 (systemd 실행 시)
+        cwd = Path.cwd()
+        _log_dir = cwd / "logs"
+        # 여전히 이상한 경로인 경우
+        if str(_log_dir).startswith('/root'):
+            # 방법 3: 환경 변수 WORKING_DIRECTORY 확인
+            working_dir = os.environ.get('WORKING_DIRECTORY')
+            if working_dir:
+                _log_dir = Path(working_dir) / "logs"
+            else:
+                # 최후의 수단: /tmp 사용
+                _log_dir = Path("/tmp") / "app_logs"
 
 # 앱 이름 (setup_logging 호출 시 설정됨)
 _app_name = None
