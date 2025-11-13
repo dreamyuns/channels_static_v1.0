@@ -17,13 +17,12 @@ else:
     # 기본값: 프로젝트 루트의 logs 디렉토리
     _log_dir = Path(__file__).parent.parent.resolve() / "logs"
 
+# 앱 이름 (setup_logging 호출 시 설정됨)
+_app_name = None
+
 # 로그 디렉토리 생성 (실패 시 예외 처리)
 try:
     _log_dir.mkdir(parents=True, exist_ok=True)
-    # 디버깅: 로그 디렉토리 경로 확인 (초기화 시에만 출력)
-    if not hasattr(setup_logging, '_path_logged'):
-        print(f"[LOG] 로그 디렉토리: {_log_dir.absolute()}")
-        setup_logging._path_logged = True
 except Exception as e:
     # 로그 디렉토리 생성 실패 시 임시 디렉토리 사용
     import tempfile
@@ -69,8 +68,11 @@ def _setup_logger(name: str, filename: str, category: str, level: int = logging.
     if logger.handlers:
         return logger
     
+    # 로그 파일명 처리 (앱 이름이 이미 포함된 경우 그대로 사용)
+    log_filename = filename
+    
     # 파일 핸들러 (일별 로테이션)
-    log_file = _log_dir / filename
+    log_file = _log_dir / log_filename
     try:
         file_handler = RotatingFileHandler(
             log_file,
@@ -106,20 +108,40 @@ def _setup_logger(name: str, filename: str, category: str, level: int = logging.
 
 
 def _get_logger(log_type: str):
-    """로거 가져오기"""
-    if log_type not in _loggers:
-        if log_type == 'auth':
-            _loggers[log_type] = _setup_logger('auth', 'auth.log', 'AUTH')
-        elif log_type == 'error':
-            _loggers[log_type] = _setup_logger('error', 'error.log', 'ERROR')
-        elif log_type == 'access':
-            _loggers[log_type] = _setup_logger('access', 'access.log', 'ACCESS')
-        elif log_type == 'app':
-            _loggers[log_type] = _setup_logger('app', 'app.log', 'APP')
-        else:
-            _loggers[log_type] = _setup_logger('app', 'app.log', 'APP')
+    """로거 가져오기 (통합 로그)"""
+    # 앱 이름을 포함한 고유 키 생성 (앱별로 로거 분리)
+    logger_key = f"{log_type}_{_app_name}" if _app_name else log_type
     
-    return _loggers[log_type]
+    if logger_key not in _loggers:
+        # 통합 로그: 모든 로그를 기록 (channels.log, hotel.log)
+        if _app_name:
+            log_filename = f"{_app_name}.log"
+            logger_name = f"{_app_name}_unified"
+        else:
+            log_filename = "app.log"
+            logger_name = "app_unified"
+        
+        _loggers[logger_key] = _setup_logger(logger_name, log_filename, 'APP')
+    
+    return _loggers[logger_key]
+
+
+def _get_error_logger():
+    """에러 로거 가져오기 (에러 로그만)"""
+    logger_key = f"error_{_app_name}" if _app_name else "error"
+    
+    if logger_key not in _loggers:
+        # 에러 로그: ERROR 레벨만 기록 (channels_error.log, hotel_error.log)
+        if _app_name:
+            log_filename = f"{_app_name}_error.log"
+            logger_name = f"{_app_name}_error"
+        else:
+            log_filename = "error.log"
+            logger_name = "error"
+        
+        _loggers[logger_key] = _setup_logger(logger_name, log_filename, 'ERROR', level=logging.ERROR)
+    
+    return _loggers[logger_key]
 
 
 def _clean_old_logs(days: int = 30):
@@ -139,7 +161,7 @@ def _clean_old_logs(days: int = 30):
 
 def log_auth(level: str, message: str, admin_id: str = None, ip: str = None, **kwargs):
     """인증 관련 로그"""
-    logger = _get_logger('auth')
+    logger = _get_logger('unified')
     log_level = LOG_LEVELS.get(level.upper(), logging.INFO)
     
     # 추가 정보 포맷팅
@@ -156,15 +178,18 @@ def log_auth(level: str, message: str, admin_id: str = None, ip: str = None, **k
     if extra_info:
         full_message += f": {', '.join(extra_info)}"
     
-    logger.log(log_level, full_message)
+    # 통합 로그에 기록
+    logger.log(log_level, f"[AUTH] {full_message}")
     
-    # 전체 로그에도 기록
-    log_app(level, f"[AUTH] {full_message}")
+    # ERROR 레벨인 경우 에러 로그에도 기록
+    if log_level >= logging.ERROR:
+        error_logger = _get_error_logger()
+        error_logger.log(log_level, f"[AUTH] {full_message}")
 
 
 def log_error(level: str, message: str, exception: Exception = None, traceback_str: str = None, **kwargs):
     """에러 로그"""
-    logger = _get_logger('error')
+    logger = _get_logger('unified')
     log_level = LOG_LEVELS.get(level.upper(), logging.ERROR)
     
     full_message = message
@@ -172,21 +197,43 @@ def log_error(level: str, message: str, exception: Exception = None, traceback_s
         extra_info = [f"{key}={value}" for key, value in kwargs.items()]
         full_message += f": {', '.join(extra_info)}"
     
+    # 실패 사유: 사용자 친화적 메시지 + 기술적 상세 정보
     if exception:
-        full_message += f" | Exception: {type(exception).__name__}: {str(exception)}"
+        # Exception 타입에서 간단한 사용자 친화적 메시지 추출
+        exception_type = type(exception).__name__
+        exception_msg = str(exception)
+        
+        # 간단한 매핑 (주요 Exception 타입)
+        user_friendly_msgs = {
+            'ConnectionError': '데이터베이스 연결 실패',
+            'TimeoutError': '요청 시간 초과',
+            'MemoryError': '메모리 부족',
+            'ValueError': '잘못된 값',
+            'KeyError': '필수 데이터 누락',
+            'FileNotFoundError': '파일을 찾을 수 없음',
+            'PermissionError': '권한 없음',
+        }
+        
+        user_msg = user_friendly_msgs.get(exception_type, f'{exception_type} 오류')
+        full_message += f", 사유={user_msg} | Exception: {exception_type}: {exception_msg}"
+    else:
+        full_message += f", 사유={message}"
     
-    logger.log(log_level, full_message)
+    # 통합 로그에 기록
+    logger.log(log_level, f"[ERROR] {full_message}")
+    
+    # 에러 로그에도 기록
+    error_logger = _get_error_logger()
+    error_logger.log(log_level, f"[ERROR] {full_message}")
     
     if traceback_str:
         logger.log(log_level, f"Traceback: {traceback_str}")
-    
-    # 전체 로그에도 기록
-    log_app(level, f"[ERROR] {full_message}")
+        error_logger.log(log_level, f"Traceback: {traceback_str}")
 
 
 def log_access(level: str, message: str, admin_id: str = None, action: str = None, **kwargs):
     """접근/활동 로그"""
-    logger = _get_logger('access')
+    logger = _get_logger('unified')
     log_level = LOG_LEVELS.get(level.upper(), logging.INFO)
     
     # 추가 정보 포맷팅
@@ -203,15 +250,18 @@ def log_access(level: str, message: str, admin_id: str = None, action: str = Non
     if extra_info:
         full_message += f": {', '.join(extra_info)}"
     
-    logger.log(log_level, full_message)
+    # 통합 로그에 기록
+    logger.log(log_level, f"[ACCESS] {full_message}")
     
-    # 전체 로그에도 기록
-    log_app(level, f"[ACCESS] {full_message}")
+    # ERROR 레벨인 경우 에러 로그에도 기록
+    if log_level >= logging.ERROR:
+        error_logger = _get_error_logger()
+        error_logger.log(log_level, f"[ACCESS] {full_message}")
 
 
 def log_app(level: str, message: str, **kwargs):
-    """전체 로그"""
-    logger = _get_logger('app')
+    """전체 로그 (통합 로그)"""
+    logger = _get_logger('unified')
     log_level = LOG_LEVELS.get(level.upper(), logging.INFO)
     
     full_message = message
@@ -219,21 +269,47 @@ def log_app(level: str, message: str, **kwargs):
         extra_info = [f"{key}={value}" for key, value in kwargs.items()]
         full_message += f": {', '.join(extra_info)}"
     
+    # 통합 로그에 기록
     logger.log(log_level, full_message)
+    
+    # ERROR 레벨인 경우 에러 로그에도 기록
+    if log_level >= logging.ERROR:
+        error_logger = _get_error_logger()
+        error_logger.log(log_level, full_message)
 
 
-def setup_logging():
-    """로깅 초기화"""
+def setup_logging(app_name: str = None):
+    """로깅 초기화
+    
+    Args:
+        app_name: 앱 이름 (예: "channels", "hotel"). 로그 파일명에 포함됨.
+                 None인 경우 기본 파일명 사용 (기존 방식과 호환)
+    """
+    global _app_name
+    
+    # 앱 이름 설정
+    _app_name = app_name
+    
+    # 로그 디렉토리 경로 출력 (초기화 시에만)
+    if not hasattr(setup_logging, '_path_logged'):
+        print(f"[LOG] 로그 디렉토리: {_log_dir.absolute()}")
+        if _app_name:
+            print(f"[LOG] 앱 이름: {_app_name}")
+        setup_logging._path_logged = True
+    
     # 오래된 로그 정리
     _clean_old_logs(days=30)
     
     # 기본 로거 설정
     try:
-        log_app("INFO", f"로깅 시스템 초기화 완료 (로그 디렉토리: {_log_dir.absolute()})")
+        app_info = f" (앱: {_app_name})" if _app_name else ""
+        log_app("INFO", f"로깅 시스템 초기화 완료{app_info} (로그 디렉토리: {_log_dir.absolute()})")
     except Exception as e:
         # 로그 기록 실패 시 콘솔에 출력
         print(f"[LOG ERROR] 로깅 초기화 중 오류 발생: {e}")
         print(f"[LOG] 로그 디렉토리: {_log_dir.absolute()}")
+        if _app_name:
+            print(f"[LOG] 앱 이름: {_app_name}")
 
 
 if __name__ == "__main__":
