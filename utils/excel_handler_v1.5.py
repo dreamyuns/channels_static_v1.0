@@ -56,6 +56,7 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
             column_mapping = {
                 'booking_date': date_col_name,
                 'channel_name': '채널명',
+                'sale_type': '판매유형',
                 'channel_code': '채널코드',  # 내부용, 필요시 숨김 가능
                 'hotel_count': '판매숙소수',
                 'booking_count': '예약건수',
@@ -77,6 +78,7 @@ def create_excel_file(df, summary_stats=None, sheet_name='구매일', date_type=
             desired_order = [
                 date_col_name,
                 '채널명',
+                '판매유형',
                 '판매숙소수',
                 '예약건수',
                 '총객실수',

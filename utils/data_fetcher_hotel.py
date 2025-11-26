@@ -27,7 +27,7 @@ from query_builder_hotel import (  # type: ignore
 
 
 def fetch_hotel_data(start_date, end_date, selected_hotel_ids=None,
-                     date_type='orderDate', order_status='전체'):
+                     date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     숙소별 예약 데이터 조회
     날짜별 + 숙소별 + 채널별 집계
@@ -38,6 +38,7 @@ def fetch_hotel_data(start_date, end_date, selected_hotel_ids=None,
         selected_hotel_ids: 선택된 숙소 ID 리스트 (None이면 전체)
         date_type: 날짜유형 ('useDate', 'orderDate')
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         pandas DataFrame
@@ -51,7 +52,8 @@ def fetch_hotel_data(start_date, end_date, selected_hotel_ids=None,
             end_date, 
             selected_hotel_ids=selected_hotel_ids,
             date_type=date_type,
-            order_status='전체'  # 항상 '전체'로 고정
+            order_status='전체',  # 항상 '전체'로 고정
+            sale_type=sale_type
         )
         
         df = pd.read_sql(query, engine)
@@ -80,7 +82,7 @@ def fetch_hotel_data(start_date, end_date, selected_hotel_ids=None,
 
 
 def fetch_hotel_summary_stats(start_date, end_date, selected_hotel_ids=None,
-                              date_type='orderDate', order_status='전체'):
+                              date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     숙소별 요약 통계 조회
     
@@ -90,6 +92,7 @@ def fetch_hotel_summary_stats(start_date, end_date, selected_hotel_ids=None,
         selected_hotel_ids: 선택된 숙소 ID 리스트
         date_type: 날짜유형
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         dict: 요약 통계 정보
@@ -101,7 +104,8 @@ def fetch_hotel_summary_stats(start_date, end_date, selected_hotel_ids=None,
             end_date, 
             selected_hotel_ids=selected_hotel_ids,
             date_type=date_type, 
-            order_status='전체'  # 항상 '전체'
+            order_status='전체',  # 항상 '전체'
+            sale_type=sale_type
         )
         
         df = pd.read_sql(query, engine)

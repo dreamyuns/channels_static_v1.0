@@ -61,6 +61,7 @@ def create_hotel_excel_file(df, summary_stats=None, sheet_name='구매일', date
                 'hotel_name': '숙소명',
                 'hotel_code': '숙소코드',
                 'channel_name': '채널명',
+                'sale_type': '판매유형',
                 'channel_code': '채널코드',  # 내부용, 필요시 숨김 가능
                 'booking_count': '예약건수',
                 'total_rooms': '총객실수',
@@ -83,6 +84,7 @@ def create_hotel_excel_file(df, summary_stats=None, sheet_name='구매일', date
                 '숙소명',
                 '숙소코드',
                 '채널명',
+                '판매유형',
                 '예약건수',
                 '총객실수',
                 '확정객실수',

@@ -25,7 +25,7 @@ from query_builder_v1_5 import (  # type: ignore
 )
 
 def fetch_channel_data(start_date, end_date, selected_channels=None,
-                      date_type='orderDate', order_status='전체'):
+                      date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     채널별 예약 데이터 조회
     
@@ -35,6 +35,7 @@ def fetch_channel_data(start_date, end_date, selected_channels=None,
         selected_channels: 선택된 채널 리스트
         date_type: 날짜유형 ('useDate', 'orderDate')
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         pandas DataFrame
@@ -94,7 +95,8 @@ def fetch_channel_data(start_date, end_date, selected_channels=None,
             end_date, 
             selected_channels=None,  # 쿼리 내에서 필터링
             date_type=date_type,
-            order_status='전체'  # 항상 '전체'로 고정
+            order_status='전체',  # 항상 '전체'로 고정
+            sale_type=sale_type
         )
         
         df = pd.read_sql(query, engine)
@@ -125,7 +127,7 @@ def fetch_channel_data(start_date, end_date, selected_channels=None,
         traceback.print_exc()
         return pd.DataFrame()
 
-def fetch_summary_stats(start_date, end_date, date_type='orderDate', order_status='전체'):
+def fetch_summary_stats(start_date, end_date, date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     요약 통계 조회
     
@@ -134,13 +136,14 @@ def fetch_summary_stats(start_date, end_date, date_type='orderDate', order_statu
         end_date: 종료일
         date_type: 날짜유형
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         dict: 요약 통계 정보
     """
     try:
         engine = get_db_connection()
-        query = build_summary_query(start_date, end_date, date_type, '전체')  # 항상 '전체'
+        query = build_summary_query(start_date, end_date, date_type, '전체', sale_type)  # 항상 '전체'
         
         df = pd.read_sql(query, engine)
         
@@ -168,7 +171,7 @@ def fetch_summary_stats(start_date, end_date, date_type='orderDate', order_statu
             'active_days': 0
         }
 
-def fetch_daily_trend(start_date, end_date, date_type='orderDate', order_status='전체'):
+def fetch_daily_trend(start_date, end_date, date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     일별 추세 데이터 조회
     
@@ -177,13 +180,14 @@ def fetch_daily_trend(start_date, end_date, date_type='orderDate', order_status=
         end_date: 종료일
         date_type: 날짜유형
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         pandas DataFrame
     """
     try:
         engine = get_db_connection()
-        query = build_daily_trend_query(start_date, end_date, date_type, '전체')  # 항상 '전체'
+        query = build_daily_trend_query(start_date, end_date, date_type, '전체', sale_type)  # 항상 '전체'
         
         df = pd.read_sql(query, engine)
         
@@ -255,7 +259,7 @@ def fetch_channel_list():
                 from config.channels import get_all_channel_names
                 return ['전체'] + get_all_channel_names()
 
-def fetch_channel_performance(start_date, end_date, date_type='orderDate', order_status='전체'):
+def fetch_channel_performance(start_date, end_date, date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     채널별 성과 데이터 조회
     
@@ -264,13 +268,14 @@ def fetch_channel_performance(start_date, end_date, date_type='orderDate', order
         end_date: 종료일
         date_type: 날짜유형
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         pandas DataFrame
     """
     try:
         engine = get_db_connection()
-        query = build_channel_performance_query(start_date, end_date, date_type, '전체')  # 항상 '전체'
+        query = build_channel_performance_query(start_date, end_date, date_type, '전체', sale_type)  # 항상 '전체'
         
         df = pd.read_sql(query, engine)
         

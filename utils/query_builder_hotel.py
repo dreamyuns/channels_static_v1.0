@@ -19,7 +19,7 @@ from config.master_data_loader import get_all_order_status_codes
 
 
 def build_hotel_statistics_query(start_date, end_date, selected_hotel_ids=None,
-                                 date_type='orderDate', order_status='전체'):
+                                 date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     숙소별 통계 쿼리 생성
     날짜별 + 숙소별 + 채널별 집계
@@ -30,6 +30,7 @@ def build_hotel_statistics_query(start_date, end_date, selected_hotel_ids=None,
         selected_hotel_ids: 선택된 숙소 ID 리스트 (None이면 전체)
         date_type: 날짜유형 ('useDate', 'orderDate')
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         SQL 쿼리 문자열
@@ -40,6 +41,11 @@ def build_hotel_statistics_query(start_date, end_date, selected_hotel_ids=None,
     if selected_hotel_ids and len(selected_hotel_ids) > 0:
         hotel_ids_str = ','.join([str(hid) for hid in selected_hotel_ids])
         hotel_filter = f"AND op.product_idx IN ({hotel_ids_str})"
+    
+    # 판매유형 필터 조건 생성
+    sale_type_filter = ""
+    if sale_type and sale_type != '전체':
+        sale_type_filter = f"AND pr.sale_type = '{sale_type}'"
     
     # 날짜 조건 생성
     date_condition = ""
@@ -96,6 +102,8 @@ def build_hotel_statistics_query(start_date, end_date, selected_hotel_ids=None,
         ) as channel_name,
         op.order_channel_idx as channel_idx,
         GROUP_CONCAT(DISTINCT op.order_type ORDER BY op.order_type SEPARATOR ', ') as channel_code,
+        -- 판매유형 추가
+        COALESCE(pr.sale_type, '') as sale_type,
         COUNT(DISTINCT op.order_num) as booking_count,
         SUM(COALESCE(op.terms, 1) * COALESCE(op.room_cnt, 0)) as total_rooms,
         SUM(CASE 
@@ -150,11 +158,14 @@ def build_hotel_statistics_query(start_date, end_date, selected_hotel_ids=None,
     LEFT JOIN product p ON op.product_idx = p.idx
     LEFT JOIN order_pay opay 
         ON op.order_pay_idx = opay.idx
+    LEFT JOIN product_rateplan pr
+        ON op.rateplan_idx = pr.idx
     WHERE {date_condition}
         AND op.create_date < CURDATE()
         {status_condition}
         {hotel_filter}
-    GROUP BY {date_field}, p.idx, p.name_kr, p.product_code, op.order_channel_idx, channel_name
+        {sale_type_filter}
+    GROUP BY {date_field}, p.idx, p.name_kr, p.product_code, op.order_channel_idx, channel_name, pr.sale_type
     ORDER BY booking_date DESC, hotel_name ASC, channel_name ASC
     """
     
@@ -162,7 +173,7 @@ def build_hotel_statistics_query(start_date, end_date, selected_hotel_ids=None,
 
 
 def build_hotel_summary_query(start_date, end_date, selected_hotel_ids=None,
-                              date_type='orderDate', order_status='전체'):
+                              date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     숙소별 요약 통계 쿼리 생성
     
@@ -172,6 +183,7 @@ def build_hotel_summary_query(start_date, end_date, selected_hotel_ids=None,
         selected_hotel_ids: 선택된 숙소 ID 리스트
         date_type: 날짜유형
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         SQL 쿼리 문자열
@@ -197,6 +209,11 @@ def build_hotel_summary_query(start_date, end_date, selected_hotel_ids=None,
         hotel_ids_str = ','.join([str(hid) for hid in selected_hotel_ids])
         hotel_filter = f"AND op.product_idx IN ({hotel_ids_str})"
     
+    # 판매유형 필터 조건 생성
+    sale_type_filter = ""
+    if sale_type and sale_type != '전체':
+        sale_type_filter = f"AND pr.sale_type = '{sale_type}'"
+    
     query = f"""
     SELECT 
         COUNT(DISTINCT op.order_num) as total_bookings,
@@ -211,10 +228,13 @@ def build_hotel_summary_query(start_date, end_date, selected_hotel_ids=None,
             ELSE DATE(op.create_date)
         END) as active_days
     FROM order_product op
+    LEFT JOIN product_rateplan pr
+        ON op.rateplan_idx = pr.idx
     WHERE {date_condition}
         AND op.create_date < CURDATE()
         {status_condition}
         {hotel_filter}
+        {sale_type_filter}
     """
     
     return query

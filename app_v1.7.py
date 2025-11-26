@@ -509,6 +509,24 @@ with st.sidebar:
     
     st.info(f"📅 조회 기간: {days_diff}일")
     
+    # 판매유형 선택
+    st.subheader("판매유형 선택")
+    
+    # 세션 상태 초기화
+    if 'selected_sale_type' not in st.session_state:
+        st.session_state.selected_sale_type = '전체'
+    
+    sale_type = st.selectbox(
+        "판매유형",
+        options=['전체', 'b2c', 'b2b'],
+        index=['전체', 'b2c', 'b2b'].index(st.session_state.selected_sale_type) if st.session_state.selected_sale_type in ['전체', 'b2c', 'b2b'] else 0,
+        help="판매유형을 선택하세요. '전체'를 선택하면 모든 판매유형이 조회됩니다.",
+        key='sale_type_select'
+    )
+    
+    # 세션 상태에 판매유형 저장
+    st.session_state.selected_sale_type = sale_type
+    
     # 채널 선택
     st.subheader("채널 선택")
     
@@ -568,6 +586,7 @@ with st.sidebar:
         st.session_state.start_date = default_start
         st.session_state.end_date = default_end
         st.session_state.selected_channels = ['전체']
+        st.session_state.selected_sale_type = '전체'
         # 초기화 시 필터만 초기화하고 결과 화면은 유지 (저장된 결과는 삭제하지 않음)
         st.rerun()
 
@@ -586,7 +605,8 @@ if should_show_result:
         log_access("INFO", "[ACTION] 조회 버튼 클릭 - 요청", admin_id=admin_id, 
                   기간=f"{start_date}~{end_date}", 
                   채널=",".join(selected_channels),
-                  날짜유형=date_type)
+                  날짜유형=date_type,
+                  판매유형=sale_type)
         
         # 데이터 조회 (로딩 표시: st.spinner 사용 - 접기/펼치기 없음)
         try:
@@ -601,7 +621,8 @@ if should_show_result:
                     end_date=end_date,
                     selected_channels=query_channels,
                     date_type=date_type,
-                    order_status='전체'  # 항상 '전체'로 고정
+                    order_status='전체',  # 항상 '전체'로 고정
+                    sale_type=sale_type
                 )
                 
                 # 요약 통계 조회
@@ -609,7 +630,8 @@ if should_show_result:
                     start_date, 
                     end_date, 
                     date_type=date_type,
-                    order_status='전체'  # 항상 '전체'로 고정
+                    order_status='전체',  # 항상 '전체'로 고정
+                    sale_type=sale_type
                 )
                 
                 # 조회 결과를 세션 상태에 저장
@@ -621,6 +643,7 @@ if should_show_result:
                     'date_type': date_type,
                     'order_status': '전체',  # 항상 '전체'
                     'selected_channels': selected_channels,
+                    'sale_type': sale_type,
                     'days_diff': days_diff
                 }
                 
@@ -662,6 +685,7 @@ if should_show_result:
             end_date = result['end_date']
             date_type = result['date_type']
             order_status = result['order_status']  # '전체'
+            sale_type = result.get('sale_type', '전체')
             days_diff = result['days_diff']
         else:
             # 이전 결과가 없으면 빈 결과
@@ -736,6 +760,7 @@ if should_show_result:
         column_mapping = {
             'booking_date': date_col_name,
             'channel_name': '채널명',
+            'sale_type': '판매유형',
             'hotel_count': '판매숙소수',
             'booking_count': '예약건수',
             'total_rooms': '총객실수',
@@ -757,6 +782,7 @@ if should_show_result:
         desired_order = [
             date_col_name,
             '채널명',
+            '판매유형',
             '판매숙소수',
             '예약건수',
             '총객실수',
@@ -887,5 +913,5 @@ else:
 
 # 푸터
 st.markdown("---")
-st.caption("채널별 예약 통계 시스템 v1.6 | 개발 서버")
+st.caption("채널별 예약 통계 시스템 v1.7")
 

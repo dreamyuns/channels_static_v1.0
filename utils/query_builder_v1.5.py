@@ -15,7 +15,7 @@ from config.order_status_mapping import (
 from config.master_data_loader import get_all_order_status_codes
 
 def build_integrated_query(start_date, end_date, selected_channels=None, 
-                          date_type='orderDate', order_status='전체'):
+                          date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     통합 쿼리 생성 (order_product 테이블만 사용, order_pay JOIN 추가)
     v1.5: order_item.due_price 사용 (입금가)
@@ -26,6 +26,7 @@ def build_integrated_query(start_date, end_date, selected_channels=None,
         selected_channels: 선택된 채널 리스트 (None이면 전체)
         date_type: 날짜유형 ('useDate', 'orderDate')
         order_status: 예약상태 ('전체', '확정', '취소') - 항상 '전체'로 고정됨
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         SQL 쿼리 문자열
@@ -45,6 +46,11 @@ def build_integrated_query(start_date, end_date, selected_channels=None,
         if channel_codes:
             status_list = ','.join([f"'{c}'" for c in channel_codes])
             channel_filter = f"AND op.order_type IN ({status_list})"
+    
+    # 판매유형 필터 조건 생성
+    sale_type_filter = ""
+    if sale_type and sale_type != '전체':
+        sale_type_filter = f"AND pr.sale_type = '{sale_type}'"
     
     # 날짜 조건 생성
     date_condition = ""
@@ -101,6 +107,8 @@ def build_integrated_query(start_date, end_date, selected_channels=None,
         op.order_channel_idx as channel_idx,
         -- channel_code는 참고용으로만 유지 (그룹화에는 사용하지 않음)
         GROUP_CONCAT(DISTINCT op.order_type ORDER BY op.order_type SEPARATOR ', ') as channel_code,
+        -- 판매유형 추가
+        COALESCE(pr.sale_type, '') as sale_type,
         COUNT(DISTINCT op.order_num) as booking_count,
         COUNT(DISTINCT op.product_name) as hotel_count,
         -- order_item JOIN으로 인한 중복 방지: terms * room_cnt는 order_product에서 직접 계산
@@ -157,17 +165,20 @@ def build_integrated_query(start_date, end_date, selected_channels=None,
     FROM order_product op
     LEFT JOIN order_pay opay 
         ON op.order_pay_idx = opay.idx
+    LEFT JOIN product_rateplan pr
+        ON op.rateplan_idx = pr.idx
     WHERE {date_condition}
         AND op.create_date < CURDATE()
         {status_condition}
         {channel_filter}
-    GROUP BY {date_field}, op.order_channel_idx, channel_name
+        {sale_type_filter}
+    GROUP BY {date_field}, op.order_channel_idx, channel_name, pr.sale_type
     ORDER BY booking_date DESC, booking_count DESC
     """
     
     return query
 
-def build_summary_query(start_date, end_date, date_type='orderDate', order_status='전체'):
+def build_summary_query(start_date, end_date, date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     요약 통계 쿼리 생성
     
@@ -176,6 +187,7 @@ def build_summary_query(start_date, end_date, date_type='orderDate', order_statu
         end_date: 종료일
         date_type: 날짜유형 ('useDate', 'orderDate')
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         SQL 쿼리 문자열
@@ -195,6 +207,11 @@ def build_summary_query(start_date, end_date, date_type='orderDate', order_statu
         status_list = ','.join([f"'{s}'" for s in all_statuses])
         status_condition = f"AND op.order_product_status IN ({status_list})"
     
+    # 판매유형 필터 조건 생성
+    sale_type_filter = ""
+    if sale_type and sale_type != '전체':
+        sale_type_filter = f"AND pr.sale_type = '{sale_type}'"
+    
     query = f"""
     SELECT 
         COUNT(DISTINCT op.order_num) as total_bookings,
@@ -210,14 +227,17 @@ def build_summary_query(start_date, end_date, date_type='orderDate', order_statu
             ELSE DATE(op.create_date)
         END) as active_days
     FROM order_product op
+    LEFT JOIN product_rateplan pr
+        ON op.rateplan_idx = pr.idx
     WHERE {date_condition}
         AND op.create_date < CURDATE()
         {status_condition}
+        {sale_type_filter}
     """
     
     return query
 
-def build_daily_trend_query(start_date, end_date, date_type='orderDate', order_status='전체'):
+def build_daily_trend_query(start_date, end_date, date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     일별 추세 쿼리 생성
     
@@ -226,6 +246,7 @@ def build_daily_trend_query(start_date, end_date, date_type='orderDate', order_s
         end_date: 종료일
         date_type: 날짜유형
         order_status: 예약상태 (항상 '전체'로 고정)
+        sale_type: 판매유형 ('전체', 'b2c', 'b2b')
     
     Returns:
         SQL 쿼리 문자열
@@ -246,6 +267,11 @@ def build_daily_trend_query(start_date, end_date, date_type='orderDate', order_s
         status_list = ','.join([f"'{s}'" for s in all_statuses])
         status_condition = f"AND op.order_product_status IN ({status_list})"
     
+    # 판매유형 필터 조건 생성
+    sale_type_filter = ""
+    if sale_type and sale_type != '전체':
+        sale_type_filter = f"AND pr.sale_type = '{sale_type}'"
+    
     query = f"""
     SELECT 
         {date_field} as date,
@@ -257,21 +283,24 @@ def build_daily_trend_query(start_date, end_date, date_type='orderDate', order_s
             WHERE oi2.order_product_idx = op.idx
         ), 0) * COALESCE(op.room_cnt, 1)) as revenue
     FROM order_product op
+    LEFT JOIN product_rateplan pr
+        ON op.rateplan_idx = pr.idx
     WHERE {date_condition}
         AND op.create_date < CURDATE()
         {status_condition}
+        {sale_type_filter}
     GROUP BY {date_field}
     ORDER BY date ASC
     """
     
     return query
 
-def build_channel_performance_query(start_date, end_date, date_type='orderDate', order_status='전체'):
+def build_channel_performance_query(start_date, end_date, date_type='orderDate', order_status='전체', sale_type='전체'):
     """
     채널별 성과 쿼리 생성
     """
     
-    query = build_integrated_query(start_date, end_date, None, date_type, order_status)
+    query = build_integrated_query(start_date, end_date, None, date_type, order_status, sale_type)
     
     # GROUP BY를 채널별로만 수정
     modified_query = query.replace(

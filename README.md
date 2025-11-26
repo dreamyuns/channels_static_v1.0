@@ -4,12 +4,17 @@ allmytour.com의 다양한 예약 통계를 실시간으로 조회하고 엑셀�
 
 ## 📋 시스템 목록
 
-1. **채널별 예약 통계 시스템** (v1.6) - 채널별 예약 데이터 조회
-2. **숙소별 예약 통계 시스템** (v1.1) - 숙소별 예약 데이터 조회
+1. **채널별 예약 통계 시스템** (v1.61) - 채널별 예약 데이터 조회
+2. **숙소별 예약 통계 시스템** (v1.21) - 숙소별 예약 데이터 조회
+
+**📦 저장소 통합:**
+- 두 시스템 모두 `channels_static_v1.0` 저장소에서 관리
+- 공통 모듈 (`config/`, `utils/`) 공유
+- 운영 서버에서도 하나의 디렉토리(`channels_statistics`)에서 실행
 
 ---
 
-# 채널별 예약 통계 시스템 v1.6
+# 채널별 예약 통계 시스템 v1.61
 
 채널별 예약 통계를 실시간으로 조회하고 엑셀로 추출할 수 있는 시스템입니다.
 
@@ -36,7 +41,14 @@ allmytour.com의 다양한 예약 통계를 실시간으로 조회하고 엑셀�
 
 ## 🚀 버전 히스토리
 
-### v1.6 (현재 버전) - 2025년 1월
+### v1.61 (현재 버전) - 2025년 11월
+- 🐛 **새로고침 시 로그아웃 문제 해결**
+  - JavaScript 리다이렉트 즉시 실행 (setTimeout 제거)
+  - `window.location.replace()` 사용으로 빠른 리다이렉트
+  - Streamlit 1.28.0+ 버전 요구사항 (`st.query_params` 사용)
+  - 로그인 후 새로고침 시에도 로그인 상태 유지 확인
+
+### v1.6 - 2025년 1월
 - 🔐 **사용자 인증 기능 추가**
   - `tblmanager` 테이블 기반 로그인 시스템
   - `user_status = '1'`인 사용자만 접근 가능
@@ -52,8 +64,8 @@ allmytour.com의 다양한 예약 통계를 실시간으로 조회하고 엑셀�
   - 로그인 페이지와 메인 페이지 분리
   - 헤더에 로그아웃 버튼 추가
 - 🔄 **세션 관리 개선**
-  - 세션 타임아웃 제거 (새로고침 문제 해결)
-  - 쿠키 기반 인증 복원으로 브라우저 새로고침 시에도 로그인 상태 유지
+  - 세션 타임아웃 제거
+  - 쿠키 기반 인증 복원으로 브라우저 새로고침 시에도 로그인 상태 유지 (v1.61에서 완전히 해결됨)
 
 ### v1.5 - 2025년 1월
 - 🔄 **입금가 계산 방식 변경**: `product_rateplan_price` → `order_item` 테이블 사용
@@ -108,7 +120,7 @@ allmytour.com의 다양한 예약 통계를 실시간으로 조회하고 엑셀�
 
 ## 🛠️ 기술 스택
 
-- **Frontend**: Streamlit
+- **Frontend**: Streamlit 1.28.0+ (st.query_params 사용)
 - **Backend**: Python 3.12+
 - **Database**: MySQL (SQLAlchemy)
 - **Data Processing**: Pandas
@@ -170,26 +182,29 @@ DB_NAME=your_database_name
 #### 채널별 예약 통계 시스템
 
 ```bash
-# v1.6 실행 (최신)
-streamlit run app_v1.6.py
+# v1.61 실행 (최신, 새로고침 문제 해결 버전)
+streamlit run app_v1.61.py --server.port=8501
+
+# 또는 v1.6 실행
+streamlit run app_v1.6.py --server.port=8501
 
 # 또는 v1.5 실행
-streamlit run app_v1.5.py
+streamlit run app_v1.5.py --server.port=8501
 
 # 또는 v1.4 실행
-streamlit run app_v1.4.py
+streamlit run app_v1.4.py --server.port=8501
 
 # 또는 v1.3 실행
-streamlit run app_v1.3.py
+streamlit run app_v1.3.py --server.port=8501
 
 # 또는 v1.2 실행
-streamlit run app_v1.2.py
+streamlit run app_v1.2.py --server.port=8501
 
 # 또는 v1.1 실행
-streamlit run app_v1.1.py
+streamlit run app_v1.1.py --server.port=8501
 
 # 또는 v1.0 실행
-streamlit run app.py
+streamlit run app.py --server.port=8501
 ```
 
 브라우저에서 `http://localhost:8501`로 접속하세요.
@@ -197,7 +212,10 @@ streamlit run app.py
 #### 숙소별 예약 통계 시스템
 
 ```bash
-# v1.1 실행 (최신)
+# v1.21 실행 (최신, 새로고침 문제 해결 버전)
+streamlit run app_v1.21_hotel.py --server.port=8502
+
+# 또는 v1.1 실행
 streamlit run app_v1.1_hotel.py --server.port=8502
 
 # 또는 v1.0 실행
@@ -207,12 +225,17 @@ streamlit run app_v1.0_hotel.py --server.port=8502
 브라우저에서 `http://localhost:8502`로 접속하세요.
 
 **서버 배포 시:**
-- 로컬: 포트 8502
-- 서버: 포트 8008
+- 로컬: 채널별 포트 8501, 숙소별 포트 8502
+- 서버: 채널별 포트 8007, 숙소별 포트 8008
+- 두 애플리케이션 모두 `channels_statistics` 디렉토리에서 실행
 
 **v1.6부터는 로그인이 필요합니다:**
 - `tblmanager` 테이블의 `admin_id`와 `passwd`로 로그인
 - `user_status = '1'`인 계정만 접근 가능
+
+**⚠️ Streamlit 버전 요구사항:**
+- Streamlit 1.28.0 이상 필요 (`st.query_params` 사용)
+- 설치: `pip install --upgrade streamlit`
 
 ## 📁 프로젝트 구조
 
@@ -224,9 +247,11 @@ streamlit run app_v1.0_hotel.py --server.port=8502
 ├── app_v1.3.py           # v1.3 버전
 ├── app_v1.4.py           # v1.4 버전
 ├── app_v1.5.py           # v1.5 버전
-├── app_v1.6.py           # v1.6 버전 (현재)
+├── app_v1.6.py           # v1.6 버전
+├── app_v1.61.py          # v1.61 버전 (새로고침 문제 해결, 현재)
 ├── app_v1.0_hotel.py     # 숙소별 예약 통계 시스템 v1.0
-├── app_v1.1_hotel.py     # 숙소별 예약 통계 시스템 v1.1 (현재)
+├── app_v1.1_hotel.py     # 숙소별 예약 통계 시스템 v1.1
+├── app_v1.21_hotel.py    # 숙소별 예약 통계 시스템 v1.21 (새로고침 문제 해결, 현재)
 ├── config/
 │   ├── channels.py        # 채널 설정 및 매핑
 │   ├── channel_mapping.py # master_data.xlsx 매핑 로더
@@ -402,6 +427,10 @@ SUM(COALESCE(opay.total_amount, 0))
 - 쿠키에 `auth_admin_id` 저장 (1일 유효)
 - 브라우저 새로고침 시 쿠키에서 인증 정보 복원
 - 로그아웃 시 세션 상태와 쿠키 모두 삭제
+- **새로고침 문제 해결** (v1.61/v1.21):
+  - JavaScript 리다이렉트 즉시 실행으로 타이밍 문제 해결
+  - `window.location.replace()` 사용으로 빠른 인증 복원
+  - 로그인 후 새로고침 시에도 로그인 상태 유지
 
 **로그인 페이지**:
 - 별도 페이지로 구현
@@ -475,7 +504,7 @@ GROUP BY ...
 
 ---
 
-# 숙소별 예약 통계 시스템 v1.1
+# 숙소별 예약 통계 시스템 v1.21
 
 숙소별 예약 통계를 실시간으로 조회하고 엑셀로 추출할 수 있는 시스템입니다.
 
@@ -506,7 +535,14 @@ GROUP BY ...
 
 ## 🚀 버전 히스토리
 
-### v1.1 (현재 버전) - 2025년 1월
+### v1.21 (현재 버전) - 2025년 11월
+- 🐛 **새로고침 시 로그아웃 문제 해결**
+  - JavaScript 리다이렉트 즉시 실행 (setTimeout 제거)
+  - `window.location.replace()` 사용으로 빠른 리다이렉트
+  - Streamlit 1.28.0+ 버전 요구사항 (`st.query_params` 사용)
+  - 로그인 후 새로고침 시에도 로그인 상태 유지 확인
+
+### v1.1 - 2025년 1월
 - ✨ **검색 기능 개선**
   - 검색 버튼 삭제, 엔터키로만 검색
   - 선택된 숙소도 검색 결과에 표시 (중복 선택 방지)
@@ -533,7 +569,9 @@ GROUP BY ...
 
 ## 📖 사용 방법
 
-1. 웹 브라우저에서 애플리케이션 접속 (`http://localhost:8502`)
+1. 웹 브라우저에서 애플리케이션 접속
+   - 로컬: `http://localhost:8502`
+   - 서버: `http://서버주소:8008`
 2. **로그인** (채널별 통계 시스템과 동일한 계정 사용)
 3. 사이드바에서 검색 조건 설정:
    - **날짜유형**: 구매일 또는 이용일 선택

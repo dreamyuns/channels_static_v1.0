@@ -514,6 +514,24 @@ with st.sidebar:
     
     st.info(f"📅 조회 기간: {days_diff}일")
     
+    # 판매유형 선택
+    st.subheader("판매유형 선택")
+    
+    # 세션 상태 초기화
+    if 'selected_sale_type' not in st.session_state:
+        st.session_state.selected_sale_type = '전체'
+    
+    sale_type = st.selectbox(
+        "판매유형",
+        options=['전체', 'b2c', 'b2b'],
+        index=['전체', 'b2c', 'b2b'].index(st.session_state.selected_sale_type) if st.session_state.selected_sale_type in ['전체', 'b2c', 'b2b'] else 0,
+        help="판매유형을 선택하세요. '전체'를 선택하면 모든 판매유형이 조회됩니다.",
+        key='sale_type_select'
+    )
+    
+    # 세션 상태에 판매유형 저장
+    st.session_state.selected_sale_type = sale_type
+    
     # 숙소 검색
     st.subheader("숙소 검색")
     
@@ -725,6 +743,7 @@ with st.sidebar:
         st.session_state.end_date = default_end
         st.session_state.selected_hotels = []
         st.session_state.search_term = ''
+        st.session_state.selected_sale_type = '전체'
         st.session_state.last_search_result = None
         st.rerun()
 
@@ -755,7 +774,8 @@ if should_show_result:
         log_access("INFO", "[ACTION] 조회 버튼 클릭 - 요청", admin_id=admin_id, 
                   기간=f"{start_date}~{end_date}", 
                   숙소수=len(selected_hotel_ids),
-                  날짜유형=date_type)
+                  날짜유형=date_type,
+                  판매유형=sale_type)
         
         # 데이터 조회 (로딩 표시: st.spinner 사용 - 접기/펼치기 없음)
         try:
@@ -765,7 +785,8 @@ if should_show_result:
                     end_date=end_date,
                     selected_hotel_ids=selected_hotel_ids,
                     date_type=date_type,
-                    order_status='전체'  # 항상 '전체'로 고정
+                    order_status='전체',  # 항상 '전체'로 고정
+                    sale_type=sale_type
                 )
                 
                 # 요약 통계 조회
@@ -774,7 +795,8 @@ if should_show_result:
                     end_date, 
                     selected_hotel_ids=selected_hotel_ids,
                     date_type=date_type,
-                    order_status='전체'  # 항상 '전체'로 고정
+                    order_status='전체',  # 항상 '전체'로 고정
+                    sale_type=sale_type
                 )
                 
                 # 조회 결과를 세션 상태에 저장
@@ -786,6 +808,7 @@ if should_show_result:
                     'date_type': date_type,
                     'order_status': '전체',
                     'selected_hotel_ids': selected_hotel_ids,
+                    'sale_type': sale_type,
                     'days_diff': days_diff
                 }
                 
@@ -827,6 +850,7 @@ if should_show_result:
             end_date = result['end_date']
             date_type = result['date_type']
             order_status = result['order_status']  # '전체'
+            sale_type = result.get('sale_type', '전체')
             days_diff = result['days_diff']
         else:
             # 이전 결과가 없으면 빈 결과
@@ -902,6 +926,7 @@ if should_show_result:
             'booking_date': date_col_name,
             'hotel_name': '숙소명',
             'channel_name': '채널명',
+            'sale_type': '판매유형',
             'booking_count': '예약건수',
             'total_rooms': '총객실수',
             'confirmed_rooms': '확정객실수',
@@ -923,6 +948,7 @@ if should_show_result:
             date_col_name,
             '숙소명',
             '채널명',
+            '판매유형',
             '예약건수',
             '총객실수',
             '확정객실수',
@@ -1052,5 +1078,5 @@ else:
 
 # 푸터
 st.markdown("---")
-st.caption("숙소별 예약 통계 시스템 v1.1 | 개발 서버")
+st.caption("숙소별 예약 통계 시스템 v1.3")
 
